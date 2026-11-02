@@ -1,0 +1,33 @@
+# thermabot helpers (NFR-SAFE-8). Add to configuration.yaml (or create the same helpers in the
+# UI: Settings > Devices & services > Helpers) BEFORE installing thermabot_watchdog.yaml.
+# No `initial:` on purpose: HA restores the last state after a restart, so an owner switching
+# the watchdog off keeps it off (NFR-SAFE-8). Check that thermabot_watchdog is ON once the
+# heartbeat is running.
+
+input_boolean:
+  thermabot_enabled:        # kill-switch mirror (FR-HA-7); the bot sets it
+    name: thermabot enabled
+    icon: mdi:robot
+  thermabot_watchdog:       # separate watchdog disable for the owner (NFR-SAFE-8)
+    name: thermabot watchdog armed
+    icon: mdi:shield-home
+input_datetime:
+  thermabot_watchdog_last:  # stamped when the watchdog acts; bot reads it to attribute the change
+    name: thermabot watchdog last fired
+    has_date: true
+    has_time: true
+
+# Heartbeat webhook automation (automations.yaml list item). Its last_triggered is what the
+# watchdog checks. Pick a long random webhook id and put the full URL in HEARTBEAT_WEBHOOK_URL:
+#   http://<your-ha>:8123/api/webhook/<webhook id>
+#
+# - id: thermabot_heartbeat_webhook
+#   alias: "thermabot heartbeat"
+#   mode: queued
+#   max: 3
+#   trigger:
+#     - platform: webhook
+#       webhook_id: replace-with-a-random-webhook-id
+#       allowed_methods: [POST]
+#       local_only: true
+#   action: []

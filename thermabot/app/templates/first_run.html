@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Create administrator{% endblock %}
+{% block content %}
+<article class="card auth-card">
+  <img class="brand-mark auth-mark" src="{{ asset('brand-mark.svg') }}"
+    width="48" height="48" alt="">
+  <h1>Welcome to thermabot</h1>
+  <p>Create your administrator account. It has the <strong>Owner</strong> role, with access
+    to settings, backups, and user management. There is no default username or password.</p>
+  <p class="muted">Do this on a trusted network before exposing the app to other people.
+    Registration closes as soon as the first account is created.</p>
+  <form data-api="POST api/first-run" data-done="Administrator created" data-reload
+        data-testid="first-run-form">
+    <label>Username
+      <input name="username" autocomplete="username" minlength="1" maxlength="64"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*" required
+             aria-describedby="username-help">
+    </label>
+    <small id="username-help">Use letters, numbers, dots, underscores, or hyphens; start with
+      a letter or number.</small>
+    <label>Password
+      <input name="password" type="password" autocomplete="new-password"
+             minlength="{{ min_password }}" maxlength="128" required
+             aria-describedby="password-help">
+    </label>
+    <small id="password-help">Use a unique password of {{ min_password }} to 128 characters.</small>
+    <label>Confirm password
+      <input name="confirm" type="password" autocomplete="new-password"
+             minlength="{{ min_password }}" maxlength="128" required>
+    </label>
+    <p class="errors" data-testid="errors" role="alert"></p>
+    <button type="submit">Create administrator</button>
+  </form>
+  <p class="muted">Creating an account does not start the bot or change the thermostat.
+    If no saved configuration exists, the setup wizard opens next. Existing configuration
+    is kept and the wizard is skipped.</p>
+  <noscript><p>JavaScript and cookies are required to create your account in the browser.
+    The local <code>python -m thermabot create-user</code> command is also available.</p></noscript>
+</article>
+{% endblock %}

@@ -1,0 +1,179 @@
+# Actions are pinned to immutable SHAs; Dependabot keeps the pinned revisions fresh.
+name: ci
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+permissions:
+  contents: read
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install --require-hashes -r requirements.lock
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy --strict thermabot/core
+      # v0.6.1: unit + integration must also collect together (no test-module basename clash)
+      - run: python -m pytest --collect-only -q tests/unit tests/integration
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install --require-hashes -r requirements.lock
+      - run: python -m pytest tests/unit -q --cov=thermabot/core --cov-fail-under=90 --junitxml=junit-unit.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-unit
+          path: junit-unit.xml
+          retention-days: 7
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install --require-hashes -r requirements.lock
+      - run: python -m pytest tests/integration -q --junitxml=junit-integration.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-integration
+          path: junit-integration.xml
+          retention-days: 7
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install --require-hashes -r requirements.lock
+      - run: playwright install --with-deps chromium
+      - run: python -m pytest tests/e2e -q --junitxml=junit-e2e.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-e2e
+          path: junit-e2e.xml
+          retention-days: 7
+
+  addon-config:
+    # Validate the Home Assistant add-on manifest on every push and pull request.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install pyyaml
+      - run: python scripts/check_addon_config.py
+
+  gitleaks:
+    # Secret scan of the working tree on every push and PR (pinned binary, checksum-verified).
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: install gitleaks
+        run: |
+          f=gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          curl -sSfL -o "$f" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$f"
+          echo "${GITLEAKS_SHA256}  $f" | sha256sum -c -
+          tar -xzf "$f" gitleaks
+      - name: gitleaks dir (working tree)
+        run: ./gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - run: pip install pip-audit
+      - run: pip-audit --require-hashes -r requirements.lock
+      - run: pip-audit --require-hashes -r requirements.runtime.lock
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+      - run: docker build -t thermabot:scan .
+      - name: scan application image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: thermabot:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - run: docker build --file addon/Dockerfile --tag thermabot-addon:scan .
+      - name: scan Home Assistant add-on image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: thermabot-addon:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  qa-report:
+    needs: [unit, integration, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: {pattern: "junit-*", merge-multiple: true}
+      - run: python scripts/qa_report.py junit-unit.xml junit-integration.xml junit-e2e.xml -o qa-report.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: qa-report
+          path: qa-report.md
+          retention-days: 7
+
+  image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, unit, integration, e2e, security, gitleaks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: v
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+          # Keep prerelease images separate from the stable source-install path.
+          tags: |
+            ghcr.io/comment23/thermabot-dev:${{ github.ref_name }}
+            ghcr.io/comment23/thermabot-dev:sha-${{ steps.v.outputs.short }}

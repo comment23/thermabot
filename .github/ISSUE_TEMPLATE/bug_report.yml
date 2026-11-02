@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Security issues: do not file here, see SECURITY.md.**
+        Please remove tokens, IP addresses and personal names from logs before pasting.
+  - type: input
+    id: version
+    attributes:
+      label: thermabot version
+      description: From /healthz (`version`) or the image tag.
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: state
+    attributes:
+      label: Bot state when it happened
+      options: [SETUP NEEDED, DISABLED, SHADOW, ACTIVE, OVERRIDE, DEGRADED, not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: thermostat
+    attributes:
+      label: Thermostat / HA integration
+      placeholder: e.g. Trane via Nexia, ecobee, generic_thermostat
+  - type: input
+    id: ha
+    attributes:
+      label: Home Assistant version
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (redacted)
+      render: text

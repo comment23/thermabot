@@ -1,0 +1,7 @@
+/.github/ @comment23
+/deploy/ @comment23
+/thermabot/app/auth.py @comment23
+/thermabot/app/controller.py @comment23
+/thermabot/adapters/ha_rest.py @comment23
+/thermabot/adapters/ha_ws.py @comment23
+/thermabot/core/ @comment23

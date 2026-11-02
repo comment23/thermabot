@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head dashboard-heading"><div><p class="eyebrow">YOUR HOME, IN BALANCE</p>
+  <h2>Comfort at a glance</h2><p>Live conditions, thoughtful planning, and you in control.</p></div>
+  <a href="plan" class="secondary outline" role="button">View your plan</a></div>
+{% if eff.label == 'SETUP NEEDED' %}<p class="banner" data-testid="setup-needed">Setup needed: no thermostat is configured, so the bot reads no climate entity and never writes to Home Assistant. {% if p and p.can('edit_safety') %}<a href="setup" data-testid="setup-link">Run the setup wizard</a> to pick the thermostat, then restart.{% elif p and p.can('edit_comfort') %}Ask an Owner to run the setup wizard, or set <code>thermostat.entity_id</code> on the <a href="settings">Settings</a> page (Owner), then restart.{% else %}Ask an Owner to run the setup wizard.{% endif %}</p>{% endif %}
+<section class="card control-center" id="controls" data-testid="dashboard-controls" aria-labelledby="controls-title">
+  <div class="card-head"><div><p class="eyebrow">COMMAND CENTER</p><h3 id="controls-title">Controls</h3></div>
+    <span class="muted">Changes stay behind your existing safety checks.</span></div>
+  <div class="control-grid">
+    <div class="control-tile"><h4>Bot operation</h4>
+      <p>Stop automation, or start in watch-only Shadow mode. Active control requires the Owner and completed soak.</p>
+      {% if p.can('kill_off') and (kill == 'on' or p.can('kill_on')) %}
+      <button id="kill-open" data-kill="open" data-testid="kill-open"
+        class="{{ 'stop' if kill == 'on' else 'start' }}" data-can-start="{{ 1 if p.can('kill_on') else 0 }}">{{ 'Stop bot' if kill == 'on' else 'Start bot' }}</button>{% endif %}
+      {% if p.can('kill_on') %}<button class="secondary outline" data-kill="mode" data-testid="control-mode">Choose run mode</button>{% endif %}
+      {% if not p.can('kill_off') %}<p class="muted">Ask an Owner or Admin to change bot operation.</p>{% endif %}
+    </div>
+    {% if p.can('override') %}<div class="control-tile"><h4>Temporary comfort</h4>
+      <p>Temporarily pause planned changes or set an override. Safety restores remain enabled.</p>
+      <a href="#override-tools" role="button" class="secondary outline">Temperature override</a>
+      <button class="secondary outline" data-api="POST api/override"
+        data-body='{"pause": true, "duration": {{ settings.override.default|tojson }}}'
+        data-done="Plan paused temporarily" data-reload data-testid="control-pause">Pause plan: {{ settings.override.default }}</button>
+    </div>{% endif %}
+    {% if p.can('guest_toggle') %}<div class="control-tile"><h4>Home &amp; guests</h4>
+      <p>Make the home comfortable for visitors while keeping your usual settings.</p>
+      <button class="secondary outline" data-api="POST api/guest" data-body='{"on": {{ 'false' if guest_on else 'true' }}}'
+        data-done="Saved" data-reload data-testid="guest-toggle">Guest mode: {{ 'ON, turn off' if guest_on else 'OFF, turn on' }}</button>
+    </div>{% endif %}
+    {% if p.can('edit_safety') %}<div class="control-tile"><h4>Protect &amp; recover</h4>
+      <p>Export settings, make a data backup, and set up an independent HA safety net.</p>
+      <a href="recovery" role="button" class="secondary outline" data-testid="recovery-link">Backup &amp; recovery</a>
+      <a href="settings" role="button" class="secondary outline">Comfort settings</a>
+    </div>{% endif %}
+  </div>
+</section>
+<div class="grid-2 dash-top">
+<section data-testid="now" class="hero" data-state="{{ eff.state }}">
+  {% if snap %}
+  <div class="hero-main">
+    <div><small>Inside</small>
+      <strong class="hero-temp" data-testid="tstat-temp">{{ snap.thermostat.current_temp if snap.thermostat.current_temp is not none else '-' }}°F</strong></div>
+    <div class="hero-mode"><span class="chip {{ snap.thermostat.hvac_action or '' }}">mode <span data-testid="hvac-mode">{{ snap.thermostat.hvac_mode }}</span>
+      {% if snap.thermostat.hvac_action %}({{ snap.thermostat.hvac_action }}){% endif %}</span>
+      {% if snap.thermostat.outdoor_temp is not none %}<small>Outdoor {{ snap.thermostat.outdoor_temp }}°F</small>{% endif %}</div>
+  </div>
+  <dl class="hero-stats">
+    <div><dt>Heat to</dt><dd>{{ snap.thermostat.heat_sp or '-' }}</dd></div>
+    <div><dt>Cool to</dt><dd>{{ snap.thermostat.cool_sp or '-' }}</dd></div>
+    <div><dt>Comfort</dt><dd data-testid="score">{{ '%.0f'|format(score) if score is not none else '-' }}</dd></div>
+  </dl>
+  {% else %}<p class="empty" data-testid="no-snapshot">No thermostat reading yet.</p>
+  <p>Comfort score: <strong data-testid="score">{{ '%.0f'|format(score) if score is not none else '-' }}</strong></p>{% endif %}
+  <p class="hero-next"><small>Next change</small><br><span data-testid="next-change">{{ next_change or 'none planned' }}</span></p>
+  <div class="actions"><a href="forecast" role="button" class="secondary outline" data-testid="forecast-link">48 h forecast &amp; plan</a>
+    <a href="efficiency" role="button" class="secondary outline" data-testid="efficiency-tile">Efficiency: {{ eff_tile.text if eff_tile else '-' }}</a></div>
+  {% if eff.base == 'SHADOW' %}<p><small data-testid="shadow-days">SHADOW day
+    {{ '%.1f'|format(shadow_days) }} of {{ shadow_min_days }}: the bot logs what it would do and writes nothing.</small></p>{% endif %}
+  {% if eff.state == 'DEGRADED' %}<p class="banner" data-testid="degraded">DEGRADED
+    ({{ eff.degraded_reason }}): {{ 'Home Assistant or the thermostat is unreachable/stale; plan writes are paused.' if eff.degraded_reason == 'ha' else ('no HVAC sensors are configured (Settings > HVAC sensors); plan writes are paused.' if eff.degraded_reason == 'sensors' else 'weather forecast is stale; using the fallback plan.') }}</p>{% endif %}
+  {% if eff.state == 'DISABLED' %}<p class="banner" data-testid="disabled">The bot is DISABLED. It
+    makes no writes; the thermostat runs on its own schedule.</p>{% endif %}
+</section>
+<section class="card" data-testid="history-card" data-history-card data-range="24h" data-units="{{ units }}">
+  <div class="card-head"><h3>History</h3>
+    <div class="seg-btns" role="group" aria-label="History range" data-testid="history-range">
+      {% for r, lbl in [('24h', '24 h'), ('7d', '7 days'), ('30d', '30 days')] %}<button type="button" data-range="{{ r }}"
+        aria-pressed="{{ 'true' if r == '24h' else 'false' }}" data-testid="range-{{ r }}">{{ lbl }}</button>{% endfor %}
+    </div></div>
+  <figure class="chart-card">
+    <div class="chart" data-chart="history" data-testid="history-chart" role="img"
+      aria-label="Indoor and outdoor temperature, setpoints and heating, cooling and fan run time"></div>
+    <figcaption class="key">Shading: <i class="heat"></i>heating <i class="cool"></i>cooling <i class="fan"></i>fan
+      &middot; dashed = setpoints &middot; °{{ units }}</figcaption>
+  </figure>
+  <details class="fallback" data-testid="history-fallback"><summary>Show as a table</summary>
+    <table class="cards" data-testid="history-table"><thead><tr><th>Time</th><th>Indoor</th><th>Outdoor</th><th>Heat to</th><th>Cool to</th><th>Heat</th><th>Cool</th><th>Fan</th></tr></thead>
+    <tbody><tr><td colspan="8">Loading…</td></tr></tbody></table>
+  </details>
+</section>
+</div>
+<section class="card">
+  <h3>Rooms</h3>
+  <table data-testid="rooms" class="cards"><thead><tr><th>Floor / room</th><th>°F</th><th>Age</th><th>Score</th></tr></thead><tbody>
+  {% for r in rooms %}{% set room_cfg = settings.rooms.get(r.key) %}<tr data-room="{{ r.key }}" data-floor="{{ room_cfg.floor if room_cfg else '' }}"><td>
+    {% if room_cfg and room_cfg.floor %}<small>{{ room_cfg.floor }}</small><br>{% endif %}{{ r.key }}</td>
+    <td data-label="°F" class="{{ 'stale' if r.stale else '' }} {{ 'est' if r.estimated else '' }}">{{ r.temp if r.temp is not none else '-' }}{% if r.estimated %} (est){% endif %}{% if r.stale %} (stale){% endif %}{% if r.aux_flag %} ⚠ aux{% endif %}</td>
+    <td data-label="Age">{{ '%.0f'|format(r.age_min) ~ ' min' if r.age_min is not none else '-' }}</td>
+    <td data-label="Score">{{ '%.0f'|format(r.score) if r.score is not none else '-' }}</td></tr>
+  {% else %}<tr><td colspan="4">No room data yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% if opening_assessment %}
+<section class="card" data-testid="opening-assessment">
+  <h3>Door &amp; garage SHADOW assessment</h3>
+  <p><small>Observations only. Thermostat and device controls are unchanged.</small></p>
+  <ul>{% for finding in opening_assessment %}
+    <li data-opening-status="{{ finding.status }}">
+      <strong>{{ finding.status|title }}</strong> · {{ finding.entity_ids|join(', ') }}
+      {% if finding.rooms %} · rooms: {{ finding.rooms|join(', ') }}{% endif %}
+      {% if finding.duration_min is not none %} · {{ '%.1f'|format(finding.duration_min) }} min{% endif %}
+      <br><small>{{ finding.message }}</small>
+    </li>
+  {% endfor %}</ul>
+</section>
+{% endif %}
+<div class="grid-2">
+{% if p.can('override') %}
+<section class="card" id="override-tools" data-testid="override-controls">
+  <h3>Override</h3>
+  <form data-api="POST api/override" data-done="Override started" data-reload>
+    <div class="grid">
+      <label>Target °F <input type="number" name="target_f" min="60" max="82" step="1"></label>
+      <label>Mode <select name="mode"><option value="">(keep)</option>
+        {% for m in ['heat', 'cool', 'heat_cool', 'off'] %}<option>{{ m }}</option>{% endfor %}</select></label>
+      <label>Duration <select name="duration">{% for d in settings.override.choices if d != 'until' %}
+        <option{% if d == settings.override.default %} selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
+    </div>
+    <p class="errors"></p>
+    <button type="submit" data-testid="override-start">Start override</button>
+  </form>
+  {% if override %}<button class="secondary" data-api="DELETE api/override" data-done="Override cancelled"
+    data-reload data-testid="override-cancel">Cancel override</button>{% endif %}
+</section>
+{% endif %}
+{% if not p.can('edit_comfort') %}
+<section class="card" data-testid="settings-summary"><h3>Comfort settings (read-only)</h3>
+  <table><thead><tr><th>Season</th><th>Home</th><th>Sleep</th><th>Away</th></tr></thead><tbody>
+  {% for s in ['heat', 'cool'] %}{% set b = settings.bands[s] %}<tr><td>{{ s }}</td>
+    <td>{{ b.home[0]|num }}-{{ b.home[1]|num }}</td><td>{{ b.sleep[0]|num }}-{{ b.sleep[1]|num }}</td><td>{{ b.away[0]|num }}-{{ b.away[1]|num }}</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,19 @@
+fastapi
+uvicorn
+jinja2
+pydantic>=2
+pydantic-settings
+httpx
+websockets
+numpy
+tzdata
+argon2-cffi
+# dev / test
+pytest
+pytest-asyncio
+ruff
+mypy
+playwright
+pytest-cov
+pyyaml
+pip-audit

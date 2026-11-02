@@ -1,0 +1,90 @@
+# thermabot HA watchdog (DESIGN.md section 13, NFR-SAFE-7/8). AUTOMATION (automations.yaml
+# list item). Create the helpers first (thermabot_helpers.reference.yaml).
+#
+# BEFORE INSTALLING, replace the placeholders:
+#   climate.your_thermostat      -> your thermostat entity (the bot's settings.thermostat.entity_id)
+#   notify.notify                -> your notify service (e.g. notify.mobile_app_<phone>)
+#   68 / 76                      -> your Home heating-band low / cooling-band high (FR-CMF-1)
+#
+# Heartbeat = last_triggered of automation.thermabot_heartbeat_webhook (a webhook automation the
+# bot POSTs to every 60 s via HEARTBEAT_WEBHOOK_URL).
+# Enable only AFTER the bot runs and triggers that webhook every cycle; before that the
+# heartbeat is "never" = stale, so any manual OFF is undone within ~1 min.
+# Restores heat_cool from OFF only; stamps input_datetime.thermabot_watchdog_last BEFORE acting.
+
+- id: thermabot_watchdog
+  alias: "thermabot watchdog: restore from off"
+  description: >-
+    Safety net independent of the thermabot container. Only restores from OFF; never sets OFF.
+    Acts regardless of the bot's kill switch; disable via input_boolean.thermabot_watchdog.
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: time_pattern
+      minutes: "/1"
+    - platform: homeassistant
+      event: start
+  condition:
+    - condition: state
+      entity_id: input_boolean.thermabot_watchdog
+      state: "on"
+    - condition: state
+      entity_id: climate.your_thermostat
+      state: "off"
+    - condition: template
+      value_template: >-
+        {% set t = state_attr('climate.your_thermostat','current_temperature') | float(none) %}
+        {% set last = state_attr('automation.thermabot_heartbeat_webhook','last_triggered') %}
+        {% set floor_ceiling = t is not none and (t <= 62 or t >= 80) %}
+        {% set stale = last is none or (now() - last).total_seconds() > 900 %}
+        {{ floor_ceiling or stale }}
+  action:
+    - variables:
+        temp: "{{ state_attr('climate.your_thermostat','current_temperature') | float(0) }}"
+        why: >-
+          {% set last = state_attr('automation.thermabot_heartbeat_webhook','last_triggered') %}
+          {% if temp <= 62 %}floor ({{ temp }}°F)
+          {% elif temp >= 80 %}ceiling ({{ temp }}°F)
+          {% else %}bot heartbeat stale ({{ 'never' if last is none else last | relative_time }}){% endif %}
+    - service: input_datetime.set_datetime
+      target: {entity_id: input_datetime.thermabot_watchdog_last}
+      data: {timestamp: "{{ now().timestamp() }}"}
+    # T1.44: some thermostats (e.g. Trane/Nexia) ignore hvac_mode inside set_temperature when
+    # coming out of OFF. Set the mode explicitly first, wait for it, then the setpoints.
+    - service: climate.set_hvac_mode
+      target: {entity_id: climate.your_thermostat}
+      data: {hvac_mode: heat_cool}
+    - wait_template: "{{ is_state('climate.your_thermostat', 'heat_cool') }}"
+      timeout: "00:02:00"
+      continue_on_timeout: true
+    - service: climate.set_temperature
+      target: {entity_id: climate.your_thermostat}
+      data:
+        target_temp_low: 68     # Home heating band low  (FR-CMF-1)
+        target_temp_high: 76    # Home cooling band high (FR-CMF-1)
+    # Verify the end state before claiming success.
+    - wait_template: >-
+        {{ is_state('climate.your_thermostat', 'heat_cool')
+           and state_attr('climate.your_thermostat','target_temp_low') | float(0) == 68
+           and state_attr('climate.your_thermostat','target_temp_high') | float(0) == 76 }}
+      timeout: "00:02:00"
+      continue_on_timeout: true
+    - choose:
+        - conditions: "{{ wait.completed }}"
+          sequence:
+            - service: notify.notify
+              data:
+                title: "thermabot watchdog fired"
+                message: >-
+                  HVAC was OFF and {{ why }}. Restored heat_cool 68-76°F at {{ now().strftime('%H:%M') }}.
+      default:
+        - service: notify.notify
+          data:
+            title: "thermabot watchdog FAILED"
+            message: >-
+              HVAC was OFF and {{ why }}. Restore attempt FAILED at {{ now().strftime('%H:%M') }}:
+              state={{ states('climate.your_thermostat') }}
+              low={{ state_attr('climate.your_thermostat','target_temp_low') }}
+              high={{ state_attr('climate.your_thermostat','target_temp_high') }}.
+              Check the thermostat.
+    - delay: "00:15:00"         # mode: single + delay = at most one action per 15 min

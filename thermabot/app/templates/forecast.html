@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Forecast{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Forecast &amp; 48 h plan</h2>
+<p data-testid="forecast-source">Provider <strong>{{ 'NWS' if d.provider == 'nws' else 'Open-Meteo' }}</strong>{% if d.source and d.source != d.provider %} (last forecast from {{ d.source }}){% endif %}{% if d.fetched_at %} &middot; fetched {{ d.fetched_at|localtime }}{% endif %} &middot; {{ hours|length }} hours &middot; &deg;{{ units }}</p></div>
+{% if proj.fallback %}<p class="banner" data-testid="fallback-banner">{{ proj.banner or 'Fallback plan' }}{% if not proj.model_fitted %}: the thermal model has not been fitted yet, so the plan follows the schedule bands (or the thermostat's own setpoints) and the indoor/runtime estimates use default model values.{% endif %}</p>{% endif %}
+{% if d.stale %}<p class="banner" data-testid="weather-stale">Weather forecast missing or stale{% if d.fetched_at %} (fetched {{ d.fetched_at|localtime }}){% endif %}.</p>{% endif %}
+{% if hours %}
+<section class="card">
+<figure class="chart-card">
+  <div class="chart" data-chart="forecast" data-src="forecast-data" data-testid="forecast-chart" role="img"
+    aria-label="Outdoor temperature, planned setpoint band and expected runtime for the next {{ hours|length }} hours"></div>
+  <script type="application/json" id="forecast-data">{{ chart|tojson }}</script>
+  <figcaption class="key">Outdoor, expected indoor (dashed), <i class="band"></i>setpoint band,
+    <i class="heat"></i>heat / <i class="cool"></i>cool runtime per hour.</figcaption>
+</figure>
+<details class="fallback" data-testid="forecast-fallback" open><summary>Hourly table</summary>
+<table class="cards" data-testid="forecast-table"><thead><tr><th>Time</th><th>Outdoor</th><th>RH</th><th>Sky</th><th>Plan</th><th>Indoor</th><th>Runtime</th></tr></thead><tbody>
+{% for h in hours %}<tr data-testid="forecast-row"><td>{{ h.t|localtime }}</td>
+  <td data-label="Outdoor">{{ disp(h.temp_f) }}</td>
+  <td data-label="RH">{{ '%.0f%%'|format(h.humidity) if h.humidity is not none else '-' }}</td>
+  <td data-label="Sky">{{ h.conditions or '-' }}</td>
+  <td data-label="Plan">{{ h.mode }}{% if h.heat_sp is not none %} heat {{ disp(h.heat_sp) }}{% endif %}{% if h.cool_sp is not none %} cool {{ disp(h.cool_sp) }}{% endif %}</td>
+  <td data-label="Indoor">{{ disp(h.indoor_f) }}</td>
+  <td data-label="Runtime">{% if h.heat_min %}heat {{ '%.0f'|format(h.heat_min) }} min {% endif %}{% if h.cool_min %}cool {{ '%.0f'|format(h.cool_min) }} min{% endif %}{% if not h.heat_min and not h.cool_min %}{{ '0' if h.heat_min is not none else '-' }}{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+</details>
+</section>
+{% else %}<p class="empty" data-testid="no-forecast">No forecast yet. The first fetch runs at start-up and then every hour.</p>{% endif %}
+{% endblock %}

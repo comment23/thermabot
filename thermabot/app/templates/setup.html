@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Setup wizard</h2></div>
+<p class="card"><small>Reads Home Assistant only; nothing is written to Home Assistant and nothing is saved
+until the last step. Secrets (<code>HA_URL</code>, <code>HA_TOKEN</code>) stay in the
+environment. Saving never changes the run mode or starts/stops the bot.</small></p>
+<div id="setup" data-testid="setup" data-settings='{{ settings_json }}' data-running="{{ running_entity or '' }}">
+  <ol class="steps" data-testid="setup-steps">
+    <li data-step="1">Connect</li><li data-step="2">Thermostat</li><li data-step="3">Sensors</li>
+    <li data-step="4">People</li><li data-step="5">Comfort</li><li data-step="6">Weather</li><li data-step="7">Review</li>
+  </ol>
+
+  <section data-step="1" data-testid="step-ha">
+    <h3>1. Home Assistant connection</h3>
+    <p>Configured URL: <code data-testid="ha-url">{{ ha_url or 'not set' }}</code>. The token comes from
+      <code>HA_TOKEN</code> in the environment.</p>
+    <button type="button" data-setup="ha-test" data-testid="ha-test">Test connection</button>
+    <p class="result" data-testid="ha-result" aria-live="polite"></p>
+  </section>
+
+  <section data-step="2" data-testid="step-thermostat" hidden>
+    <h3>2. Thermostat</h3>
+    <p><small>The one climate entity the bot may control. Changing it takes effect after a
+      restart.</small></p>
+    <div data-testid="climate-list" class="picklist" role="radiogroup" aria-label="Thermostat"></div>
+  </section>
+
+  <section data-step="3" data-testid="step-sensors" hidden>
+    <h3>3. Sensors</h3>
+    <p><small>Suggested matches are pre-selected with their confidence. Type to search all
+      entities and override any of them, or leave a field empty.</small></p>
+    <div data-testid="sensor-fields"></div>
+    <h4>Rooms</h4>
+    <p><small>Room temperature sensors the comfort score uses. The thermostat itself is always a
+      room.</small></p>
+    <div data-testid="room-list"></div>
+    <button type="button" class="secondary outline" data-setup="add-room" data-testid="add-room">Add a room</button>
+    <div class="card" data-testid="home-context">
+      <h4>Home context and additional equipment</h4>
+      <p><small>Read-only assessment from Home Assistant. Confirm each room/floor and device;
+        discovery does not control equipment or change thermostat settings.</small></p>
+      <p data-testid="home-location" aria-live="polite"></p>
+      <p data-testid="sun-position"></p>
+      <div class="grid">
+        <div><strong>Fans</strong><ul data-testid="fan-candidates"></ul></div>
+        <div><strong>Motorized-cover candidates</strong><ul data-testid="cover-candidates"></ul></div>
+        <div><strong>Supplemental-heat candidates</strong><ul data-testid="heater-candidates"></ul></div>
+        <div><strong>Door contacts</strong>
+          <label><input type="checkbox" data-testid="openings-enabled"> Enable read-only SHADOW assessment</label>
+          <div class="grid">
+            <label>Sustained-open threshold (minutes)
+              <input type="number" min="1" max="1440" step="1" data-testid="opening-min-open"></label>
+            <label>Recovery delay after closure (minutes)
+              <input type="number" min="0" max="120" step="1" data-testid="opening-recovery"></label>
+            <label>Stale reading threshold (0 disables age check)
+              <input type="number" min="0" max="1440" step="1" data-testid="opening-stale"></label>
+          </div>
+          <p><small>Use an age threshold only when the integration reports unchanged sensor
+            states periodically. Unknown or stale contacts produce no door-based recommendation.</small></p>
+          <div data-testid="opening-rules"></div>
+        </div>
+      </div>
+      <p><small>Door contacts are observations only. Garage doors do not imply that the
+        conditioned house is exposed; confirm the garage/house-door relationship before any
+        future policy is enabled.</small></p>
+    </div>
+  </section>
+
+  <section data-step="4" data-testid="step-people" hidden>
+    <h3>4. Presence</h3>
+    <p><small>Tick the people or trackers that count for home/away and give each a short name.
+      Nobody ticked = the house always counts as occupied.</small></p>
+    <div data-testid="people-list"></div>
+  </section>
+
+  <section data-step="5" data-testid="step-comfort" hidden>
+    <h3>5. Comfort bands</h3>
+    <label>Display units
+      <select data-testid="units" name="units"><option value="F">°F</option><option value="C">°C</option></select></label>
+    <p><small>Low/high per block and season. Rules: heat high ≤ cool low, and cool high − heat
+      low ≥ <span data-testid="deadband"></span>.</small></p>
+    <div data-testid="bands"></div>
+    <button type="button" class="secondary outline" data-setup="defaults" data-testid="bands-defaults">Use defaults</button>
+  </section>
+
+  <section data-step="6" data-testid="step-weather" hidden>
+    <h3>6. Weather</h3>
+    <p><small>The forecast drives the 48 h plan. Open-Meteo works worldwide with no key; NWS covers
+      the US only. Leave the location empty to use Home Assistant&#39;s home location.</small></p>
+    <label>Provider
+      <select data-testid="weather-provider" name="weather-provider">
+        <option value="open_meteo">Open-Meteo (global, no key)</option>
+        <option value="nws">NWS (US National Weather Service)</option></select></label>
+    <div class="grid">
+      <label>Latitude <input type="number" step="any" inputmode="decimal" min="-90" max="90"
+        data-testid="weather-lat" name="weather-lat" placeholder="HA home location"></label>
+      <label>Longitude <input type="number" step="any" inputmode="decimal" min="-180" max="180"
+        data-testid="weather-lon" name="weather-lon" placeholder="HA home location"></label>
+    </div>
+    <div data-weather-tools data-provider="[data-testid=weather-provider]" data-lat="[data-testid=weather-lat]"
+      data-lon="[data-testid=weather-lon]" data-units="{{ settings.display.units }}" data-testid="weather-tools">
+      <button type="button" class="secondary outline" data-weather="ha-location" data-testid="weather-ha-location">Use HA home location</button>
+      <button type="button" class="secondary" data-weather="test" data-testid="weather-test">Test fetch</button>
+      <div class="result" data-testid="weather-result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section data-step="7" data-testid="step-review" hidden>
+    <h3>7. Review and save</h3>
+    <div data-testid="review"></div>
+    <p class="banner" data-testid="restart-note" hidden>The thermostat changes from
+      <code data-testid="restart-from"></code> to <code data-testid="restart-to"></code>. Restart thermabot to
+      apply it; until then the bot keeps using the old one.</p>
+    <button type="button" data-setup="save" data-testid="setup-save">Save settings</button>
+  </section>
+
+  <p class="errors" data-testid="setup-errors" aria-live="polite"></p>
+  <div class="wizard-nav">
+    <button type="button" class="secondary" data-setup="back" data-testid="setup-back">Back</button>
+    <button type="button" data-setup="next" data-testid="setup-next">Next</button>
+  </div>
+</div>
+<script src="{{ asset('weather.js') }}"></script>
+<script src="{{ asset('setup.js') }}"></script>
+{% endblock %}

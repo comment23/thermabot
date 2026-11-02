@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Backup & recovery{% endblock %}
+{% block content %}
+<script src="{{ asset('recovery.js') }}" defer></script>
+<div class="page-head"><div><p class="eyebrow">KEEP YOUR HOME RESILIENT</p>
+  <h2>Backup &amp; recovery</h2><p>Owner tools. No thermostat writes from this page.</p></div></div>
+<p class="banner">Backups contain account password hashes, sessions, location settings and history.
+  Store them privately and encrypted. Configuration exports exclude environment credentials,
+  but still contain household details. Neither includes Home Assistant's own backups.</p>
+<div class="grid-2">
+  <section class="card"><h3>Configuration</h3>
+    <p>Move all saved comfort, safety, schedule and device settings between installs.
+      Environment credentials are never exported.</p>
+    <a href="api/config/export" role="button" class="secondary outline" data-testid="config-export">Export configuration</a>
+    <form id="config-import">
+      <label for="config-file">Import an exported configuration (maximum 1 MB)</label>
+      <input id="config-file" type="file" accept=".json,application/json" required data-testid="config-file">
+      <button type="submit" class="secondary" data-testid="config-preview">Validate &amp; preview</button>
+    </form>
+    <div id="import-preview" hidden>
+      <p id="import-changes" role="status" data-testid="import-changes"></p>
+      <details><summary>Review changed values</summary><pre id="import-values"></pre></details>
+      <p>Stop the bot before applying. A verified pre-import database backup is saved first.
+        Import never starts the bot. Thermostat changes require a restart.</p>
+      <button id="config-apply" data-testid="config-apply">Confirm &amp; import</button>
+    </div>
+    <p id="recovery-errors" class="errors" role="alert"></p>
+  </section>
+  <section class="card"><h3>Data backups</h3>
+    <p>A consistent SQLite copy includes configuration, users and data. Environment secrets
+      and external InfluxDB / Home Assistant history must be backed up separately.</p>
+    <button id="backup-create" data-testid="backup-create">Create &amp; download backup</button>
+    <p id="backup-result" role="status" data-testid="backup-result"></p>
+    <p id="automatic-backup" class="muted"></p>
+    <p>Download and keep off-device copies. Manual and pre-import backups are not
+      automatically removed; manage their storage offline.</p>
+    <ul id="backup-list" data-testid="backup-list"></ul>
+  </section>
+</div>
+<section class="card"><h3>Home Assistant survivability</h3>
+  <p id="recovery-health" role="status" data-testid="recovery-health">Loading connection status...</p>
+  <p>If Home Assistant cannot be read, Thermabot clears stale readings, pauses writes and
+    reconnects on the next tick. Your thermostat keeps its last settings; its own schedules
+    and hardware protection must remain the final safety layer. A restart is not a safety restore.</p>
+  <p>The optional HA package detects missing Thermabot heartbeats after 15 minutes,
+    disables the enable mirror and creates an HA notification. It never writes climate settings.
+    It cannot operate while Home Assistant itself is down.</p>
+  <a href="api/recovery/ha-package" role="button" class="secondary outline" data-testid="ha-package">Download optional HA package</a>
+  <ol>
+    <li>Review the YAML. Merge existing helpers and heartbeat automation rather than duplicating them.
+      This package is a non-climate alternative to the existing restore-from-OFF watchdog.</li>
+    <li>Replace its webhook placeholder with a long random private ID. Add the file under HA's
+      configured packages directory. Validate the HA configuration and restart HA.</li>
+    <li>Set Thermabot's <code>HEARTBEAT_WEBHOOK_URL</code> to the matching local HA webhook URL
+      and restart Thermabot. Confirm the last-heartbeat helper updates every minute.</li>
+    <li>Only then enable the heartbeat safety-net helper. Start in Shadow and verify
+      heartbeat loss disables the mirror. Review before enabling again; no automatic restart.</li>
+  </ol>
+</section>
+<section class="card"><h3>Restore safely, offline</h3>
+  <p>To restore only configuration, use the validated import above. To restore all SQLite data:</p>
+  <ol>
+    <li>Stop Thermabot completely. Keep a separate copy of the entire data directory, including
+      any <code>-wal</code> and <code>-shm</code> files. Never overwrite a running database.</li>
+    <li>Use the same Thermabot version as the backup first. Verify the backup with
+      <code>sqlite3 backup.db "PRAGMA integrity_check;"</code>; the result must be <code>ok</code>.</li>
+    <li>In an empty data directory, place the backup as <code>thermabot.db</code>. Preserve required
+      file ownership and permissions. Do not copy old WAL/SHM files into it.</li>
+    <li>Before restarting, turn off HA's <code>input_boolean.thermabot_enabled</code>.
+      Restored sessions and run state are sensitive. Restart, stop the bot in Controls,
+      invalidate restored sessions, review settings and verify HA connectivity before enabling.</li>
+  </ol>
+  <p class="muted">This interface deliberately does not replace a live database or restore secrets.</p>
+</section>
+{% endblock %}

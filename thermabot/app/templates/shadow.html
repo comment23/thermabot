@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Shadow report{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Shadow report</h2></div>
+{% set m = r.model %}
+<section class="hero" data-state="{{ eff.state }}" data-testid="shadow-summary">
+  <p data-testid="verdict"><strong>{{ r.verdict }}</strong></p>
+  <dl class="hero-stats">
+    <div><dt>Samples</dt><dd data-testid="samples-count">{{ r.samples.count }}</dd></div>
+    <div><dt>Model</dt><dd data-testid="model-status">{% if m.status == 'fitted' %}v{{ m.version }}{% elif m.status == 'learning' %}{{ m.steps }}/{{ m.need }}{% else %}none{% endif %}</dd></div>
+    <div><dt>Saved 7 d</dt><dd data-testid="week-saved">{{ ('%.0f'|format(r.week.saved_pct)) ~ '%' if r.week.saved_pct is not none else '-' }}</dd></div>
+  </dl>
+  <p><small data-testid="learning-since">{% if r.samples.first %}Learning since {{ r.samples.first|localtime('%a %b %d %H:%M') }}{% else %}No samples yet: the bot records one per minute.{% endif %}</small></p>
+  <p><small data-testid="model-line">{% if m.status == 'fitted' %}Thermal model v{{ m.version }} fitted {{ m.fitted_at|localtime('%b %d %H:%M') }}{% if m.mae is not none %}, holdout MAE {{ '%.2f'|format(m.mae) }}°F{% endif %}.
+    {% elif m.status == 'learning' %}Learning: {{ m.steps }} of {{ m.need }} 15-minute steps collected; the first model fit is tried once there are enough.
+    {% else %}No thermal model yet; the bot holds the thermostat's current setpoints.{% endif %}</small></p>
+</section>
+<section class="card"><h3>Last 7 days</h3>
+<table class="cards" data-testid="week"><tbody>
+<tr><td>Totals</td>
+  <td data-label="Actual runtime">{{ '%.1f'|format(r.week.actual_runtime_min / 60) }} h</td>
+  <td data-label="Bot saves">{{ ('%.1f'|format(r.week.saved_min / 60)) ~ ' h' if r.week.saved_min is not none else '-' }}</td>
+  <td data-label="Comfort actual">{{ ('%.0f'|format(r.week.actual_comfort_pct)) ~ '%' if r.week.actual_comfort_pct is not none else '-' }}</td>
+  <td data-label="Comfort bot">{{ ('%.0f'|format(r.week.bot_comfort_pct)) ~ '%' if r.week.bot_comfort_pct is not none else '-' }}</td></tr>
+</tbody></table>
+</section>
+<section class="card"><h3>Per day</h3>
+{% if r.days %}
+<table class="cards" data-testid="shadow-days"><thead><tr><th>Day</th><th>Actual h</th><th>Bot h</th><th>Saved</th><th>Comfort actual</th><th>Comfort bot</th><th>Coverage</th></tr></thead><tbody>
+{% for d in r.days %}{% set ah = ((d.actual_heat_min or 0) + (d.actual_cool_min or 0)) / 60 %}
+<tr data-testid="shadow-row"><td>{{ d.day }}</td>
+  <td data-label="Actual h">{{ '%.1f'|format(ah) if d.actual_heat_min is not none else '-' }}</td>
+  <td data-label="Bot h">{{ '%.1f'|format(((d.bot_heat_min or 0) + (d.bot_cool_min or 0)) / 60) if d.bot_heat_min is not none else 'no model' }}</td>
+  <td data-label="Saved">{{ ('%.0f'|format(d.saved_pct)) ~ '%' if d.saved_pct is not none else '-' }}</td>
+  <td data-label="Comfort actual">{{ ('%.0f'|format(d.actual_comfort_pct)) ~ '%' if d.actual_comfort_pct is not none else '-' }}</td>
+  <td data-label="Comfort bot">{{ ('%.0f'|format(d.bot_comfort_pct)) ~ '%' if d.bot_comfort_pct is not none else '-' }}</td>
+  <td data-label="Coverage">{{ '%.0f'|format(d.coverage_pct or 0) }}%</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty" data-testid="no-shadow-days">No days compared yet; the first comparison is written at 00:05 for the previous day.</p>{% endif %}
+</section>
+<details class="section"><summary>How this is measured</summary><p><small data-testid="method">{{ r.method }}</small></p></details>
+{% endblock %}

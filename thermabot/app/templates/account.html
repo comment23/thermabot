@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Account</h2></div>
+<p class="card" data-testid="account-who">Signed in as <strong>{{ p.username }}</strong> ({{ p.role }}{% if p.room %}, {{ p.room }}{% endif %})</p>
+{% include "_password.html" %}
+{% endblock %}

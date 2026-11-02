@@ -1,0 +1,9 @@
+{
+ "properties": {
+  "gridId": "PHI",
+  "gridX": 50,
+  "gridY": 70,
+  "forecast": "https://api.weather.gov/gridpoints/PHI/50,70/forecast",
+  "forecastHourly": "https://api.weather.gov/gridpoints/PHI/50,70/forecast/hourly"
+ }
+}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Efficiency{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Efficiency</h2>
+<p data-testid="eff-summary">Runtime per degree-day (base {{ r.base_f|num }} &deg;F) vs mean outdoor temperature &middot; {{ r.days }} days recorded &middot; a day counts with &gt; {{ r.min_dd|num }} degree-days and &ge; {{ r.min_coverage_pct|num }}% of its minutes sampled.</p></div>
+<div class="grid-2">
+{% for key in ['heat', 'cool'] %}{% set c = r[key] %}{% set ch = charts_eff[key] %}
+<section class="card eff" data-testid="eff-{{ key }}">
+  <h3>{{ 'Heating' if key == 'heat' else 'Cooling' }} <small>({{ 'HDD' if key == 'heat' else 'CDD' }})</small></h3>
+  {% if c.empty %}<p class="banner" data-testid="eff-empty-{{ key }}">Collecting data: {{ c.empty }}.</p>{% endif %}
+  {% if ch %}
+  <figure class="chart-card">
+    <div class="chart" data-chart="efficiency" data-src="eff-data-{{ key }}" data-testid="eff-chart-{{ key }}" role="img"
+      aria-label="{{ key }} runtime per degree-day vs mean outdoor temperature"></div>
+    <script type="application/json" id="eff-data-{{ key }}">{{ ch|tojson }}</script>
+    <figcaption class="key">x: mean outdoor &deg;F &middot; y: runtime minutes per degree-day
+      {% if c.fit %}&middot; <span data-testid="eff-fit-stats">{{ c.fit.kind }} fit, n={{ c.fit.n }}, R&sup2;={{ '%.2f'|format(c.fit.r2) }}</span>, <i class="band"></i>95% band{% if c.fit.downweighted %}, {{ c.fit.downweighted }} outlier(s) down-weighted{% endif %}{% endif %}</figcaption>
+  </figure>
+  <details class="fallback"><summary>Show as a table</summary>
+    <table class="cards" data-testid="eff-table-{{ key }}"><thead><tr><th>Day</th><th>Mean outdoor °F</th><th>min / degree-day</th></tr></thead><tbody>
+    {% for pt in c.points|reverse %}<tr data-testid="eff-point"><td>{{ pt.day }}</td><td data-label="Mean outdoor °F">{{ '%.1f'|format(pt.x) }}</td><td data-label="min / DD">{{ '%.1f'|format(pt.y) }}</td></tr>{% endfor %}
+    </tbody></table>
+  </details>
+  {% endif %}
+  <p><small data-testid="eff-index-{{ key }}">{% if c.index %}Efficiency index <strong>{{ '%.0f'|format(c.index.latest) }}</strong> (7-day median vs the first 7 qualifying days = 100; lower is better).{% else %}Index: needs 7 qualifying days ({{ c.n }} so far).{% endif %}</small></p>
+</section>
+{% endfor %}
+</div>
+<section class="card" data-testid="eff-savings">
+  <div class="card-head"><h3>Savings over time</h3><span class="pill sim" data-testid="simulated-label">SIMULATED</span></div>
+  <p><small>{{ r.savings.label }}</small></p>
+  {% set s = r.savings %}
+  {% if sav_chart %}
+  <figure class="chart-card">
+    <div class="chart" data-chart="savings" data-src="savings-data" data-testid="savings-chart" role="img"
+      aria-label="Saved runtime per day and cumulative (simulated)"></div>
+    <script type="application/json" id="savings-data">{{ sav_chart|tojson }}</script>
+    <figcaption class="key">Bars: saved minutes per day (below zero = the bot would have run longer) &middot; line: cumulative.</figcaption>
+  </figure>
+  <p data-testid="savings-total">Total (simulated): <strong>{{ '%.0f'|format(s.total_saved_min) }} min</strong>{% if s.total_pct is not none %} ({{ '%.1f'|format(s.total_pct) }}% of measured runtime){% endif %} over {{ s.n_estimated }} day(s).</p>
+  <details class="fallback" open><summary>Per-day table</summary>
+  <table class="cards" data-testid="savings-table"><thead><tr><th>Day</th><th>Actual min</th><th>Bot min (sim)</th><th>Saved</th><th>Cumulative</th></tr></thead><tbody>
+  {% for d in s.days|reverse %}<tr data-testid="savings-row"><td>{{ d.day }}</td>
+    <td data-label="Actual min">{{ '%.0f'|format(d.actual_min) if d.actual_min is not none else '-' }}</td>
+    <td data-label="Bot min (sim)">{{ '%.0f'|format(d.bot_min) if d.bot_min is not none else 'no estimate' }}</td>
+    <td data-label="Saved">{% if d.saved_min is not none %}{{ '%.0f'|format(d.saved_min) }} min{% if d.saved_pct is not none %} ({{ '%.0f'|format(d.saved_pct) }}%){% endif %}{% else %}-{% endif %}</td>
+    <td data-label="Cumulative">{{ '%.0f'|format(d.cum_saved_min) }} min</td></tr>{% endfor %}
+  </tbody></table>
+  </details>
+  {% else %}<p class="empty" data-testid="savings-empty">No simulated savings yet: they appear once the thermal model is fitted and a SHADOW day has been compared (00:05 rollup).</p>{% endif %}
+</section>
+<details class="section"><summary>How this is measured</summary><p><small data-testid="method">{{ r.method }}</small></p></details>
+{% endblock %}

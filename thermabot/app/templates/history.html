@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<div class="page-head"><h2>History &amp; Savings</h2></div>
+<nav class="seg" aria-label="Range"><ul>{% for d in [7, 30, 90] %}<li><a href="history?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ d }} days</a></li>{% endfor %}</ul></nav>
+<section class="card" data-testid="savings">
+  {% if savings.counted and savings.saved_h is not none %}
+  <p>Saved <strong>{{ '%.1f'|format(savings.saved_h) }} h</strong>
+    {% if savings.ci_h is not none %}±{{ '%.1f'|format(savings.ci_h) }} h (90%){% endif %}
+    {% if savings.pct is not none %}· {{ '%.0f'|format(savings.pct) }}% vs baseline{% endif %}</p>
+  {% else %}<p data-testid="savings-pending">Savings: baseline low confidence (not enough data yet).</p>{% endif %}
+</section>
+{% if rows %}
+<section class="card">
+<figure class="chart-card">
+  <div id="chart" class="chart" data-chart="daily" data-src="hist-data" data-testid="chart" role="img"
+    aria-label="Heating and cooling hours per day"></div>
+  <script type="application/json" id="hist-data">{{ data|safe }}</script>
+</figure>
+<details class="fallback" open><summary>Per-day table</summary>
+<table data-testid="days" class="cards"><thead><tr><th>Day</th><th>Heat h</th><th>Cool h</th><th>Fan h</th><th>HDD/CDD</th><th>Comfort</th><th>State</th></tr></thead><tbody>
+{% for r in rows|reverse %}<tr data-testid="day-row"><td>{{ r.day }}</td>
+  <td data-label="Heat h">{{ '%.1f'|format((r.heat_min or 0) / 60) }}</td><td data-label="Cool h">{{ '%.1f'|format((r.cool_min or 0) / 60) }}</td>
+  <td data-label="Fan h">{{ '%.1f'|format((r.fan_only_min or 0) / 60) }}</td><td data-label="HDD/CDD">{{ r.hdd|num }}/{{ r.cdd|num }}</td>
+  <td data-label="Comfort">{{ ('%.0f'|format(r.comfort_pct)) ~ '%' if r.comfort_pct is not none else '-' }}</td><td data-label="State">{{ r.bot_state or '-' }}</td></tr>{% endfor %}
+</tbody></table>
+</details>
+</section>
+{% else %}<p class="empty" data-testid="no-history">No daily metrics yet; the first rollup runs at 00:05.</p>{% endif %}
+<section class="card"><h3>Latest weekly summary</h3>
+{% if summary %}<pre class="summary" data-testid="summary">{{ summary }}</pre>
+{% else %}<p class="empty" data-testid="no-summary">No weekly summary sent yet (Sundays 18:00).</p>{% endif %}
+</section>
+{% endblock %}

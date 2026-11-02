@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<article class="card auth-card">
+  <h2 class="auth-brand"><img class="brand-mark" src="{{ asset('brand-mark.svg') }}"
+    width="36" height="36" alt="">thermabot</h2>
+  <p class="muted">Sign in to see and control your heating and cooling.</p>
+  <form data-api="POST login" data-done="Welcome" data-reload data-testid="login-form">
+    <label>Username <input name="username" autocomplete="username" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password"
+      required></label>
+    <label><input name="trusted" type="checkbox"> Trusted device (30 days)</label>
+    <p class="errors" data-testid="errors"></p>
+    <button type="submit">Log in</button>
+  </form>
+</article>
+{% endblock %}

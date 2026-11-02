@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+jinja2
+pydantic>=2
+pydantic-settings
+httpx
+websockets
+numpy
+tzdata
+argon2-cffi

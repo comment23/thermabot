@@ -1,0 +1,64 @@
+# Optional Home Assistant package. Review before installing.
+# Replace CHANGE_ME_WITH_A_LONG_RANDOM_WEBHOOK_ID and configure Thermabot's
+# HEARTBEAT_WEBHOOK_URL to http(s)://YOUR_HA/api/webhook/THAT_SAME_ID.
+# Keep the webhook ID private. Enable thermabot_watchdog only after heartbeats arrive.
+# If an existing helper/heartbeat automation has these IDs, integrate rather than duplicate.
+# This never calls a climate service. It cannot run when Home Assistant itself is down.
+input_boolean:
+  thermabot_enabled:
+    name: Thermabot enabled
+    initial: false
+  thermabot_watchdog:
+    name: Thermabot heartbeat safety net
+
+input_datetime:
+  thermabot_heartbeat_last:
+    name: Thermabot last heartbeat
+    has_date: true
+    has_time: true
+
+automation:
+  - id: thermabot_heartbeat_webhook
+    alias: Thermabot heartbeat
+    triggers:
+      - trigger: webhook
+        webhook_id: CHANGE_ME_WITH_A_LONG_RANDOM_WEBHOOK_ID
+        allowed_methods: [POST]
+        local_only: true
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.thermabot_heartbeat_last
+        data:
+          timestamp: "{{ now().timestamp() }}"
+    mode: single
+
+  - id: thermabot_survivability
+    alias: Thermabot heartbeat lost - stop control
+    triggers:
+      - trigger: time_pattern
+        minutes: "/1"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.thermabot_watchdog
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.thermabot_enabled
+        state: "on"
+      - condition: template
+        value_template: >-
+          {{ as_timestamp(now()) -
+             as_timestamp(states('input_datetime.thermabot_heartbeat_last'), 0) > 900 }}
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.thermabot_enabled
+      - action: persistent_notification.create
+        data:
+          notification_id: thermabot_heartbeat_lost
+          title: Thermabot heartbeat lost
+          message: >-
+            No heartbeat for 15 minutes. Thermabot's enable mirror was turned off.
+            No thermostat settings were changed. Check the thermostat manually,
+            restore Thermabot connectivity, and review before enabling it again.
+    mode: single

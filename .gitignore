@@ -1,0 +1,20 @@
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+/data/
+.learnings/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# local artefacts (never commit)
+probe-results.json
+uv.lock
+qa-report.md
+junit-*.xml
+.coverage
+coverage.xml

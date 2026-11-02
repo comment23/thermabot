@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Users</h2></div>
+<section class="card">
+<table data-testid="users" class="cards"><thead><tr><th>User</th><th>Role</th><th>Room</th><th></th></tr></thead><tbody>
+{% for u in users %}<tr data-user="{{ u.username }}"><td>{{ u.username }}</td><td data-label="Role">{{ u.role }}</td><td data-label="Room">{{ u.room or '—' }}</td>
+  <td>{% if u.username != p.username %}<button class="secondary outline" data-api="DELETE api/users/{{ u.id }}"
+    data-confirm="Delete {{ u.username }}?" data-done="Deleted" data-reload data-testid="delete-{{ u.username }}">Delete</button>{% endif %}</td></tr>
+{% endfor %}</tbody></table>
+</section>
+<section class="card"><h3>Add user</h3>
+<form data-api="POST api/users" data-done="User created" data-reload data-testid="user-form">
+  <div class="grid">
+    <label>Username <input name="username" required maxlength="32"></label>
+    <label>Role <select name="role"><option>member</option><option>admin</option><option>owner</option></select></label>
+    <label>Room <select name="room"><option value="">(none)</option>{% for r in rooms %}<option>{{ r }}</option>{% endfor %}</select></label>
+    <label>Password <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+  </div>
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit">Create</button>
+</form></section>
+<section class="card"><h3>Change role</h3>
+<form data-api="PATCH api/users/0" data-done="Updated" data-reload data-testid="role-form"
+      data-api-base="PATCH api/users/" data-id-from="#uid">
+  <div class="grid">
+    <label>User <select id="uid" data-testid="role-user">{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></label>
+    <label>Role <select name="role"><option>member</option><option>admin</option><option>owner</option></select></label>
+  </div>
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit">Update</button>
+</form></section>
+<section class="card"><h3>Reset a user's password</h3>
+<form data-api="PATCH api/users/0" data-done="Password reset; their devices were signed out" data-reload
+      data-testid="reset-form" data-api-base="PATCH api/users/" data-id-from="#reset-uid">
+  <div class="grid">
+    <label>User <select id="reset-uid" data-testid="reset-user">{% for u in users if u.username != p.username %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></label>
+    <label>New password <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+  </div>
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit">Reset password</button>
+</form></section>
+{% include "_password.html" %}
+{% endblock %}

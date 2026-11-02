@@ -1,0 +1,69 @@
+name: thermabot
+version: "0.6.8-rc.4"
+slug: thermabot
+description: >-
+  Shadow-first HVAC control and automation bot. Install, let it watch for 7 days in
+  SHADOW (zero writes to your thermostat), review its plan, then switch it on. See
+  https://github.com/comment23/thermabot for the full README and config reference.
+url: https://github.com/comment23/thermabot
+# amd64 only for now: the published ghcr.io/comment23/thermabot-dev images are amd64-only
+# (no multi-arch buildx yet, deferred to a later stage 6 follow-up). Add aarch64 here once a
+# multi-arch thermabot-dev/thermabot image exists and this add-on image is built for it too.
+arch:
+  - amd64
+init: false
+startup: application
+boot: auto
+# Standard HA add-on pattern (no long-lived token to create/paste): Supervisor injects
+# SUPERVISOR_TOKEN and proxies http://supervisor/core/api to Home Assistant's own API when
+# this is set. addon/options_to_env.py uses it as HA_URL/HA_TOKEN unless the ha_url/ha_token
+# options below are explicitly set (e.g. to point at a different HA instance).
+homeassistant_api: true
+# Same model (ingress-friendly relative URLs, root_path, IngressRootPath middleware) the app
+# has carried since v0.3.0 (thermabot/app/routes_api.py), so the UI opens straight from the
+# HA sidebar with no extra login step beyond the bot's own session.
+ingress: true
+ingress_port: 8095
+panel_icon: mdi:thermostat
+map:
+  - type: data
+    read_only: false
+ports: {}
+options:
+  log_level: info
+  sensor_blower: ""
+  sensor_compressor: ""
+  sensor_outdoor: ""
+  influx_url: ""
+  influx_org: ""
+  influx_read_token: ""
+  influx_write_token: ""
+  influx_read_bucket: ""
+  influx_write_bucket: ""
+  heartbeat_webhook_url: ""
+  alert_webhook_url: ""
+  alert_webhook_token: ""
+  bob_token: ""
+  ha_url: ""
+  ha_token: ""
+schema:
+  log_level: list(debug|info|warning|error)
+  # Optional HVAC sensors (v0.6.1 one-time env seed; THERMABOT_SENSOR_*). The thermostat
+  # entity itself, rooms, bands, schedule and people are still set in the in-app setup
+  # wizard/Settings page (unchanged, already ingress-friendly) - not duplicated here.
+  sensor_blower: str?
+  sensor_compressor: str?
+  sensor_outdoor: str?
+  influx_url: str?
+  influx_org: str?
+  influx_read_token: password?
+  influx_write_token: password?
+  influx_read_bucket: str?
+  influx_write_bucket: str?
+  heartbeat_webhook_url: str?
+  alert_webhook_url: str?
+  alert_webhook_token: password?
+  bob_token: password?
+  # Advanced / override only. Leave blank to use the Supervisor token automatically.
+  ha_url: str?
+  ha_token: password?

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en" data-timezone="{{ timezone }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+{% if csrf %}<meta name="csrf-token" content="{{ csrf }}">{% endif %}
+<title>{% block title %}thermabot{% endblock %} · thermabot</title>
+<link rel="icon" type="image/svg+xml" href="{{ asset('brand-mark.svg') }}">
+<link rel="stylesheet" href="{{ asset('vendor/pico.min.css') }}">
+<link rel="stylesheet" href="{{ asset('app.css') }}">
+{% if charts %}<link rel="stylesheet" href="{{ asset('vendor/uplot/uPlot.min.css') }}">
+<script src="{{ asset('vendor/uplot/uPlot.iife.min.js') }}"></script>
+<script src="{{ asset('charts.js') }}"></script>{% endif %}
+<script src="{{ asset('vendor/htmx.min.js') }}"></script>
+<script src="{{ asset('app.js') }}"></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<main class="container">
+{% if p %}
+<header class="tb" data-testid="header">
+  <div>
+    <a class="brand" href="./"><img class="brand-mark" src="{{ asset('brand-mark.svg') }}"
+      width="36" height="36" alt="">thermabot</a>
+    <span id="state-badge" class="badge" data-testid="state-badge" data-state="{{ eff.state }}"
+          data-label="{{ eff.label }}" title="Effective bot state">{{ eff.label }}</span>
+    {% if weather_stale %}<span class="pill warn" data-testid="weather-pill"
+          title="The weather forecast is missing or stale">Weather stale</span>{% endif %}
+    {% if sensors_missing %}<span class="pill warn" data-testid="sensors-pill"
+          title="No blower/compressor/outdoor sensor is configured (Settings > HVAC sensors)">Sensors not configured</span>{% endif %}
+    {% if override %}<small data-testid="override-countdown"
+          data-expires="{{ override.expires_at.isoformat() }}">Override until
+          {{ override.expires_at|localtime }}</small>{% endif %}
+  </div>
+  <div>
+    {% set on = kill == 'on' %}
+    <span id="kill-state" class="kill" data-testid="kill-state" data-on="{{ kill or 'off' }}"
+          data-mode="{{ run_mode or '' }}">{% if not on %}Bot: Stopped{% elif run_mode == 'active'
+          %}Bot: Controlling{% else %}Bot: Watching (Shadow){% endif %}</span>
+    <a class="controls-link" href="./#controls" data-testid="controls-link">Controls</a>
+    <button type="button" class="icon-btn" data-theme-toggle data-testid="theme-toggle"
+      aria-label="Switch light/dark mode" title="Switch light/dark mode">◐</button>
+  </div>
+  {# 4 primary tabs + 'More'; a bottom tab bar under 600 px, a top nav above #}
+  {% set primary = ['/', '/plan', '/room', '/history'] %}
+  {% set icons = {'/': '⌂', '/plan': '◷', '/room': '▣', '/history': '▤'} %}
+  {% set more = nav|rejectattr(0, 'in', primary)|list %}
+  <nav data-testid="nav" class="tabs" aria-label="Main"><ul>
+    {% for href, label in nav if href in primary %}<li><a href="{{ href|rel }}"{% if href == path %} aria-current="page"{% endif %}><span class="ico" aria-hidden="true">{{ icons[href] }}</span>{{ 'Home' if href == '/' else label }}</a></li>{% endfor %}
+    <li><details class="more" data-testid="nav-more">
+      <summary{% if more|selectattr(0, 'equalto', path)|list %} aria-current="page"{% endif %}><span class="ico" aria-hidden="true">☰</span>More</summary>
+      <ul>
+        {% for href, label in more %}<li><a href="{{ href|rel }}"{% if href == path %} aria-current="page"{% endif %}>{{ label }}</a></li>{% endfor %}
+        <li><small data-testid="user">{{ p.username }} ({{ p.role }})</small></li>
+        <li><button class="secondary outline" data-api="POST logout" data-done="Logged out"
+            data-reload data-testid="logout">Log out</button></li>
+      </ul>
+    </details></li>
+  </ul></nav>
+</header>
+{% if p.can('kill_off') %}
+<dialog id="kill-dialog" data-testid="kill-dialog" aria-labelledby="kill-off-title"><article>
+  <div id="kill-off">
+    <h3 id="kill-off-title">Stop the bot</h3>
+    <p>The bot stops changing the thermostat. The thermostat keeps its current settings until
+      someone starts the bot again.</p>
+    <p id="kill-off-warning" class="banner">The thermostat is currently <strong>off</strong>.
+      Stopping the bot now would leave the house unconditioned.</p>
+    <div id="kill-restore-choices">
+      <button data-kill="off-band" data-testid="kill-off-band">Restore the Home band, then
+        stop</button>
+      <button class="secondary" data-kill="off-leave" data-testid="kill-off-leave">Leave it off
+        and stop</button>
+    </div>
+    <button class="stop" data-kill="off-leave" data-testid="kill-off">Stop bot</button>
+  </div>
+  <div id="kill-on">
+    <h3 id="kill-on-title">Start the bot</h3>
+    {% if p.can('kill_on') %}
+    <button class="start" data-kill="on-shadow" data-testid="kill-on-shadow">Start: watch only
+      (Shadow)</button>
+    {% if p.can('set_active') %}<button class="contrast" data-kill="on-active"
+      data-testid="kill-on-active">Start: control the thermostat (Active)</button>{% endif %}
+    {% else %}<p>Only an Owner can start the bot.</p>{% endif %}
+  </div>
+  <footer><button class="secondary" data-kill="cancel">Cancel</button></footer>
+</article></dialog>
+{% endif %}
+{% endif %}
+<div id="toast" role="status" data-testid="toast" hidden></div>
+{% if p %}<p id="ha-connection-warning" class="banner" role="status"{% if ha_health != 'down' %} hidden{% endif %}>
+  Home Assistant is disconnected. Displayed conditions may be stale. Thermostat writes are paused
+  until a fresh reading succeeds.</p>{% endif %}
+{% if restart_needed %}<p class="banner" data-testid="restart-banner">Restart needed: the saved
+  thermostat is <code>{{ saved_entity }}</code>{% if running_entity %}, but the running bot
+  still uses <code>{{ running_entity }}</code>{% else %}, but the running bot has none yet{% endif %}. Restart thermabot to apply it.</p>{% endif %}
+<div id="content" tabindex="-1">{% block content %}{% endblock %}</div>
+<footer class="app-footer"><span>thermabot <span data-testid="app-version">v{{ version }}</span></span>
+  <span data-testid="home-timezone">Home time: {{ timezone }}</span>
+  <span>Thoughtful comfort. Safe by design.</span></footer>
+</main>
+</body>
+</html>

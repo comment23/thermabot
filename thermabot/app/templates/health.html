@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Health{% endblock %}
+{% block content %}
+<div class="page-head"><h2>System Health</h2></div>
+<section class="card"><h3>Sources</h3>
+<table data-testid="sources"><tbody>
+  <tr data-key="ha"><td>Home Assistant</td><td class="{{ '' if h.sources.ha == 'ok' else 'stale' }}">{{ h.sources.ha }}</td></tr>
+  <tr data-key="weather"><td>Weather</td><td class="{{ '' if h.sources.weather == 'ok' else 'stale' }}">{{ h.sources.weather }}</td></tr>
+  <tr data-key="tick"><td>Last tick</td><td>{{ tick|localtime('%H:%M:%S') }}</td></tr>
+  <tr data-key="watchdog"><td>HA watchdog helper</td><td data-testid="watchdog">{{ h.watchdog_helper or 'unknown' }}</td></tr>
+</tbody></table></section>
+<section class="card"><h3>Presence (Life360 / companion)</h3>
+<table data-testid="presence"><tbody>
+{% for name, pp in people.items() %}<tr data-key="{{ name }}"><td>{{ name }}</td><td>{{ pp.state }}</td>
+  <td>{{ pp.source }}{% if pp.source == 'unknown' %} <span class="stale">(no fresh source)</span>{% endif %}</td>
+  <td>{{ ('%.0f'|format(pp.age_min)) ~ ' min' if pp.age_min is not none else '—' }}</td></tr>
+{% else %}<tr><td>No presence data yet.</td></tr>{% endfor %}
+</tbody></table></section>
+<section class="card"><h3>Writes today</h3>
+<p data-testid="writes">{% for k, v in h.writes_today.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+<p data-testid="lag">Read-back lag p50 {{ h.lag_ms.p50|num }} ms · p95 {{ h.lag_ms.p95|num }} ms</p>
+{% if h.recent_errors %}<table data-testid="errors-table"><tbody>{% for e in h.recent_errors %}
+<tr><td>{{ e.ts|localtime('%m-%d %H:%M') }}</td><td>{{ e.service }}</td><td>{{ e.reason }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+</section>
+<section class="card"><h3>Audit</h3>
+<table data-testid="audit"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>
+{% for a in audit %}<tr data-testid="audit-row"><td>{{ a.ts|localtime('%m-%d %H:%M') }}</td><td>{{ a.actor }}</td>
+  <td>{{ a.action }}</td><td><small>{{ a.detail_json }}</small></td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

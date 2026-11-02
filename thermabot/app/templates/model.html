@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Model{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Thermal Model</h2></div>
+<section class="actions">
+  <button data-api="POST api/model/refit" data-done="Refit started" data-testid="refit">Refit now</button>
+  <button class="secondary" data-api="POST api/alerts/test" data-done="Test alert sent"
+    data-testid="alert-test">Send test alert</button>
+</section>
+{% if not model %}<p class="empty" data-testid="no-model">No fitted model yet; the planner uses the fallback plan.
+  The first refit runs nightly at 03:15.</p>
+{% else %}
+<section class="card"><p data-testid="model-meta">Version {{ model.version }} · fitted {{ model.fitted_at|localtime('%Y-%m-%d %H:%M') }}
+  · {{ model.n_samples or 0 }} samples</p>
+<h3>Accuracy (MAE °F)</h3>
+<table data-testid="mae"><tbody>
+{% for k, v in model.mae.items() %}{% set lim = mae_ok.tstat if k in ('tstat', 'thermostat') else mae_ok.room %}
+<tr data-key="{{ k }}"><td>{{ k }}</td><td class="{{ 'stale' if v is not none and v > lim else '' }}">{{ '%.2f'|format(v) if v is not none else '—' }}{% if v is not none and v > lim %} (above {{ lim|num }}){% endif %}</td></tr>{% endfor %}
+</tbody></table>
+<h3>Parameters</h3>
+<table data-testid="params"><tbody>
+{% for k, v in params.items() %}<tr><td>{{ k }}</td><td><code>{{ v }}</code></td></tr>{% endfor %}
+</tbody></table>
+<h3>Room offsets</h3>
+<table data-testid="offsets"><tbody>
+{% for k, v in offsets.items() %}<tr data-key="{{ k }}"><td>{{ k }}</td><td>{{ '%+.2f'|format(v) }} °F</td></tr>
+{% else %}<tr><td>No room offsets fitted.</td></tr>{% endfor %}
+</tbody></table>
+</section>
+{% endif %}
+<section class="card"><h3>Fan experiments</h3>
+<table data-testid="fans"><thead><tr><th>Start</th><th>Gap before</th><th>Gap after</th><th>Gain</th><th>Outdoor</th></tr></thead><tbody>
+{% for f in fans %}{% set g = (f.gap_before_f - f.gap_after_f) if f.gap_before_f is not none and f.gap_after_f is not none else none %}
+<tr data-testid="fan-row"><td>{{ f.started_at|localtime('%m-%d %H:%M') }}</td><td>{{ f.gap_before_f|num }}</td>
+  <td>{{ f.gap_after_f|num }}</td><td>{{ ('%.1f'|format(g)) ~ (' ✓' if g >= min_gain else ' (below ' ~ min_gain ~ ')') if g is not none else 'pending' }}</td>
+  <td>{{ f.outdoor_f|num }}</td></tr>
+{% else %}<tr><td colspan="5">No fan experiments yet.</td></tr>{% endfor %}
+</tbody></table>
+</section>
+{% endblock %}

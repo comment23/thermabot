@@ -1,0 +1,17 @@
+# gitleaks config (CI job `gitleaks`: `gitleaks dir .` on the working tree, every push + PR).
+# Default rules; only local tool/venv directories are excluded (they never reach git).
+# Test fixtures use obviously fake tokens; add an allowlist entry here only for a specific,
+# reviewed fake value, never a pattern that could hide a real secret.
+title = "thermabot gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "local environments and caches (not part of the repo)"
+paths = [
+  '''(^|/)\.venv/''',
+  '''(^|/)\.git/''',
+  '''(^|/)\.(mypy|ruff|pytest)_cache/''',
+  '''(^|/)__pycache__/''',
+]

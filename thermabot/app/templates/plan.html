@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Plan{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Plan &amp; Timeline</h2>
+{% if plan %}<p>Created {{ plan.created_at|localtime }} &middot; {{ plan.steps|length }} steps</p>{% endif %}</div>
+{% if not plan %}<p class="empty" data-testid="no-plan">No plan yet. The first replan runs at start-up.</p>
+{% else %}
+{% if plan.kind == 'fallback' %}<p class="banner" data-testid="fallback-banner">Fallback plan:
+  {{ plan.reason_banner or 'the optimiser could not produce a plan; following the schedule bands.' }}</p>
+{% elif plan.reason_banner %}<p><small>{{ plan.reason_banner }}</small></p>{% endif %}
+<section class="card">
+<figure class="chart-card">
+  <div id="chart" class="chart" data-chart="plan" data-src="plan-data" data-testid="chart" role="img"
+    aria-label="Predicted thermostat and room temperatures with the planned setpoints"></div>
+  <script type="application/json" id="plan-data">{{ data|safe }}</script>
+</figure>
+<h3>HVAC</h3>
+<div class="track" data-testid="hvac-track">{% for b in bars %}<div class="bar {{ b.kind }}"
+  data-testid="bar" data-kind="{{ b.kind }}" data-start="{{ b.t.isoformat() }}" data-n="{{ b.n }}"
+  title="{{ b.t|localtime }} {{ b.kind }}"></div>{% endfor %}</div>
+<h3>Presence / sleep</h3>
+<div class="track" data-testid="presence-track">{% for b in blocks %}<div class="blk {{ b.block }}"
+  data-testid="block" data-block="{{ b.block }}" data-start="{{ b.t.isoformat() }}" data-n="{{ b.n }}"
+  title="{{ b.t|localtime }} {{ b.block }}"></div>{% endfor %}</div>
+</section>
+<section class="card"><h3>Changes</h3>
+<table data-testid="changes" class="cards"><thead><tr><th>Time</th><th>Action</th><th>Reason</th></tr></thead><tbody>
+{% for s in changes %}<tr data-testid="change" data-start="{{ s.t.isoformat() }}"><td>{{ s.t|localtime }}</td>
+  <td data-label="Action">{{ s.hvac_mode }}{% if s.heat_sp is not none %} heat {{ s.heat_sp }}{% endif %}{% if s.cool_sp is not none %} cool {{ s.cool_sp }}{% endif %}{% if s.fan_mode == 'on' %} fan on{% endif %}</td>
+  <td data-label="Reason">{{ s.reason or '-' }}</td></tr>{% endfor %}
+</tbody></table>
+</section>
+{% endif %}
+{% endblock %}

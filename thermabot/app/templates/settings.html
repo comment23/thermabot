@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Settings</h2></div>
+{% if p.can('edit_safety') %}<p><a href="setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>{% endif %}
+<section class="card" data-testid="bands-summary">
+  <table><thead><tr><th>Season</th><th>Home</th><th>Sleep</th><th>Away</th></tr></thead><tbody>
+  {% for s in ['heat', 'cool'] %}{% set b = settings.bands[s] %}<tr><td>{{ s }}</td>
+    <td>{{ b.home[0]|num }}-{{ b.home[1]|num }}</td><td>{{ b.sleep[0]|num }}-{{ b.sleep[1]|num }}</td><td>{{ b.away[0]|num }}-{{ b.away[1]|num }}</td></tr>{% endfor %}
+  </tbody></table>
+  <small>°F (stored){% if units == 'C' %}; the forms below show °C{% endif %}</small>
+</section>
+<form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
+      data-settings='{{ settings_json }}' novalidate>
+  <p><small>Bands, schedule, weights, tolerances and guardrails within hard limits.
+    {% if not p.can('edit_safety') %}<strong data-testid="safety-note">The <code>thermostat</code>,
+    <code>safety</code> and <code>off</code> sections need an Owner; changes there are rejected.</strong>{% endif %}
+    Safety, off and write limits are tighten-only. Temperatures are in °{{ units }}.</small></p>
+  {% for sec in sections %}
+  <details class="section" data-section="{{ sec.name }}" data-testid="section-{{ sec.name }}"{% if loop.index <= 3 %} open{% endif %}>
+    <summary>{{ sec.title }}{% if sec.locked %} <small>(Owner)</small>{% endif %}</summary>
+    <fieldset{% if sec.locked %} disabled{% endif %}>
+    {% for f in sec.fields %}
+      {% if f.kind == 'bool' %}
+      <label class="field" for="{{ f.id }}"><input type="checkbox" role="switch" id="{{ f.id }}" data-path="{{ f.path }}" data-kind="bool"{% if f.value %} checked{% endif %}> {{ f.label }}</label>
+      {% elif f.kind == 'select' %}
+      <label class="field" for="{{ f.id }}">{{ f.label }}
+        <select id="{{ f.id }}" data-path="{{ f.path }}" data-kind="select">{% for c in f.choices %}<option{% if c == f.value|string %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+      {% else %}
+      <label class="field" for="{{ f.id }}">{{ f.label }}{% if f.kind in ('temp', 'delta') %} <small>°{{ units }}</small>{% endif %}
+        <input id="{{ f.id }}" data-path="{{ f.path }}" data-kind="{{ f.kind }}"
+          {% if f.kind in ('temp', 'delta', 'number', 'int') %}type="number" step="any" inputmode="decimal"{% else %}type="text"{% endif %}
+          {% if f.f_value is not none %}data-f="{{ f.f_value }}"{% endif %}{% if f.nullable %} data-nullable="1"{% endif %}
+          value="{{ f.value if f.value is not none else '' }}"{% if f.kind == 'list' %} placeholder="comma separated"{% endif %}></label>
+      {% endif %}
+      <small class="field-error" data-error-for="{{ f.path }}"></small>
+    {% endfor %}
+    </fieldset>
+    {% if sec.name == 'weather' %}
+    <div data-weather-tools data-provider="#f-weather-provider" data-lat="#f-weather-lat" data-lon="#f-weather-lon"
+      data-units="{{ units }}" data-testid="weather-tools">
+      <p><small>Empty latitude/longitude = Home Assistant's home location. Open-Meteo is global and
+        keyless; NWS covers the US only. A test fetch saves nothing.</small></p>
+      <button type="button" class="secondary outline" data-weather="ha-location" data-testid="weather-ha-location">Use HA home location</button>
+      <button type="button" class="secondary" data-weather="test" data-testid="weather-test">Test fetch</button>
+      <div class="result" data-testid="weather-result" aria-live="polite"></div>
+    </div>
+    {% endif %}
+  </details>
+  {% endfor %}
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit" data-testid="settings-save">Save</button>
+</form>
+{% if p.can('edit_safety') %}
+<details class="section" data-testid="advanced"><summary>Advanced: settings as JSON (read only)</summary>
+  <textarea class="code" rows="20" readonly spellcheck="false" data-testid="settings-json">{{ settings_json }}</textarea>
+</details>
+{% endif %}
+<script src="{{ asset('weather.js') }}"></script>
+<script src="{{ asset('settings.js') }}"></script>
+{% endblock %}

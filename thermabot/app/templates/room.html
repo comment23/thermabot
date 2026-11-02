@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}My Room{% endblock %}
+{% block content %}
+<h2>{{ room or 'My Room' }}</h2>
+{% if rooms %}<nav class="seg" aria-label="Rooms"><ul>{% for r in rooms %}<li><a href="room?room={{ r }}"{% if r == room %} aria-current="page"{% endif %}>{{ r }}</a></li>{% endfor %}</ul></nav>{% endif %}
+{% if not room %}<p class="empty" data-testid="no-room">No room is assigned to your account. Ask an Owner to set one.</p>
+{% else %}
+<p class="card" data-testid="reading">{% if reading and reading.temp is not none %}<strong>{{ reading.temp|num }}°F</strong>
+  {% if reading.estimated %}<span class="est">(estimated)</span>{% endif %}{% if reading.stale %} <span class="stale">(stale)</span>{% endif %}
+  {% else %}No reading yet.{% endif %}</p>
+<section class="card" data-testid="active-nudges"><h3>Active nudge</h3>
+{% for i, n in active %}<p data-testid="nudge">{{ '%+g'|format(n.delta_f) }}°F until {{ n.expires_at|localtime }}
+  <button class="secondary outline" data-api="DELETE api/nudge/{{ i }}" data-done="Nudge cancelled" data-reload
+    data-testid="nudge-cancel">Cancel</button></p>
+{% else %}<p>None.</p>{% endfor %}
+</section>
+{% if can_nudge %}
+<section class="card"><h3>Nudge</h3>
+<p data-testid="limits"><small>±{{ cfg.max_delta_f|num }}°F for up to {{ cfg.max_hours|num }} h ·
+  {{ used }} of {{ cfg.per_day }} used today</small></p>
+<form data-api="POST api/nudge" data-done="Nudged; replanning" data-reload data-testid="nudge-form">
+  {% if rooms %}<input type="hidden" name="room" value="{{ room }}">{% endif %}
+  <div class="grid">
+    <label>Change <select name="delta_f" data-testid="delta">{% for d in [-2, -1, 1, 2] if d|abs <= cfg.max_delta_f %}
+      <option value="{{ d }}"{% if d == 1 %} selected{% endif %}>{{ '%+d'|format(d) }}°F</option>{% endfor %}</select></label>
+    <label>For <select name="hours" data-testid="hours">{% for h in range(1, (cfg.max_hours|int) + 1) %}
+      <option value="{{ h }}"{% if h == 2 %} selected{% endif %}>{{ h }} h</option>{% endfor %}</select></label>
+  </div>
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit" data-testid="nudge-submit"{% if used >= cfg.per_day %} disabled{% endif %}>Nudge</button>
+</form></section>
+{% endif %}
+{% endif %}
+{% endblock %}

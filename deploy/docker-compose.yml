@@ -1,0 +1,23 @@
+# Example fallback deployment. From the repository root, copy .env.example to .env,
+# fill in HA_URL and HA_TOKEN, then run:
+#   docker compose -f deploy/docker-compose.yml up -d
+# Keep .env private and back up ./data.
+services:
+  thermabot:
+    image: thermabot:0.6.8-rc.4
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: v0.6.8-rc.4
+    container_name: thermabot
+    restart: unless-stopped
+    stop_grace_period: 20s
+    mem_limit: 512m
+    ports:
+      - "8095:8095"
+    volumes:
+      - ../data:/data
+    env_file: ../.env
+    environment:
+      DATA_DIR: /data
