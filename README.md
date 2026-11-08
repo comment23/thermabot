@@ -13,7 +13,7 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.4](CHANGELOG.md#068-rc4---2026-10-30-prerelease) | Current public source snapshot; not a stable release |
+| Prerelease | [v0.6.8-rc.5](CHANGELOG.md#068-rc5---2026-11-08-prerelease) | Prerelease source; not a stable release |
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -28,7 +28,8 @@ authorize enabling thermostat control. See [CHANGELOG.md](CHANGELOG.md) for rele
 - The kill switch is off and the run mode defaults to **SHADOW**. SHADOW simulates decisions
   and sends no thermostat writes.
 - Thermostat commands pass through one controller path, safety guards, and an entity/service
-  allowlist. The bot does not automatically resume control after a Home Assistant outage.
+  allowlist. Writes stop while Home Assistant is unavailable; they may resume after it recovers
+  if the bot is still ACTIVE and its enable mirror is on.
 - The Home Assistant heartbeat-loss package is optional. It can disable the enable mirror and
   notify, but it never writes thermostat settings and cannot run while Home Assistant itself
   is unavailable.
@@ -77,7 +78,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on currently supports **amd64**. The public source snapshot is a prerelease, not a
 stable production release. The in-app version is the application version (`0.6.8`); the
-Home Assistant add-on catalog marks this build as `0.6.8-rc.4`. See
+Home Assistant add-on catalog marks this build as `0.6.8-rc.5`. See
 [first-run setup](docs/setup.md) for the wizard and operating details.
 
 ### Docker Compose (fallback)

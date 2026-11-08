@@ -9,8 +9,10 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.conftest import Srv, assert_page_healthy, login
+from thermabot.adapters import db
 from thermabot.config import RoomCfg
 from thermabot.core.openings import OpeningFinding
+from thermabot.core.overrides import override_command_key
 from thermabot.core.types import Plan, PlanStep, RoomReading, Snapshot, ThermostatState
 
 
@@ -105,8 +107,25 @@ def test_override_start_and_cancel_via_api(page: Page, srv: Srv) -> None:
     page.click("[data-testid=override-start]")
     expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-state", "OVERRIDE")
     expect(page.locator("[data-testid=override-countdown]")).to_contain_text("Override")
-    row = srv.ctx.conn.execute("SELECT kind, source FROM overrides").fetchone()
+    row = srv.ctx.conn.execute("SELECT id, kind, source FROM overrides").fetchone()
     assert (row["kind"], row["source"]) == ("ui_target", "ui:ann")
+    status = page.locator("[data-testid=override-command-status]")
+    expect(status).to_contain_text("Awaiting the next control cycle")
+    expect(status).to_contain_text("Requests older than three minutes will be blocked")
+    key = override_command_key(row["id"])
+    for raw, message in (
+        ("sending", "in progress or unconfirmed"),
+        ("applied:heat 68F, cool 72F", "heat 68F, cool 72F"),
+        ("matched:target 70F", "target 70F"),
+        ("blocked:shadow mode", "Not applied: shadow mode"),
+        ("failed", "Thermostat change was not confirmed"),
+    ):
+        db.write_kv(srv.ctx.conn, key, raw)
+        page.reload()
+        expect(status).to_contain_text(message)
+    srv.ctx.conn.execute("DELETE FROM bot_kv WHERE key=?", (key,))
+    page.reload()
+    expect(status).to_contain_text("request is unconfirmed")
     page.click("[data-testid=override-cancel]")
     expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-state", "SHADOW")
     assert len(replans) == 2

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import statistics
 from collections.abc import Awaitable, Callable
@@ -26,7 +27,13 @@ from thermabot.app.sse import Broker, frame, stream
 from thermabot.config import Settings
 from thermabot.core import statemachine as sm
 from thermabot.core.openings import OpeningFinding
-from thermabot.core.overrides import Nudge, create_nudge, override_expiry
+from thermabot.core.overrides import (
+    OVERRIDE_COMMAND_STATES,
+    Nudge,
+    create_nudge,
+    override_command_key,
+    override_expiry,
+)
 from thermabot.core.schedule import TZ
 from thermabot.core.types import (
     Forecast,
@@ -52,6 +59,7 @@ from thermabot.core.types import (
 TICK_STALE = timedelta(minutes=3)
 KILL_BUDGET_S = 5.0
 MIRROR_TIMEOUT_S = 0.9
+log = logging.getLogger(__name__)
 
 
 async def _noop_async(*_: object) -> None:
@@ -121,7 +129,18 @@ class Ctx:
             " AND expires_at > ? ORDER BY id DESC LIMIT 1",
             (_iso(self.clock()),),
         ).fetchone()
-        return None if r is None else OverrideOut(**dict(r))
+        if r is None:
+            return None
+        data = dict(r)
+        if r["kind"] in ("ui_target", "ui_mode"):
+            raw = db.read_kv(self.conn, override_command_key(r["id"]))
+            status, _, detail = (raw or "").partition(":")
+            if status not in OVERRIDE_COMMAND_STATES:
+                if raw is not None:
+                    log.error("invalid override command state for id %s", r["id"])
+                status, detail = "unconfirmed", ""
+            data.update(command_status=status, command_detail=detail or None)
+        return OverrideOut(**data)
 
     def audit(self, p: Principal, action: str, request: Request, **detail: object) -> None:
         ip = request.client.host if request.client else None
@@ -431,23 +450,48 @@ async def override_start(body: OverrideIn, request: Request, c: CtxD, p: Overrid
     now = c.clock()
     if body.target_f is None and body.mode is None and not body.pause:
         raise HTTPException(422, "need target_f, mode or pause")
+    if body.pause and (body.target_f is not None or body.mode is not None):
+        raise HTTPException(422, "pause cannot be combined with a target or mode")
+    if body.target_f is not None and (
+        body.mode == "off"
+        or (
+            body.mode is None
+            and c.snapshot is not None
+            and c.snapshot.thermostat.hvac_mode == "off"
+        )
+    ):
+        raise HTTPException(422, "select a heating or cooling mode before setting a target")
     try:
         exp = override_expiry(body.duration, now, c.settings.schedule, body.until)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     kind = "ui_pause" if body.pause else "ui_mode" if body.mode else "ui_target"
-    c.conn.execute(
-        "UPDATE overrides SET ended_at=?, end_reason='replaced' WHERE ended_at IS NULL",
-        (_iso(now),),
-    )
-    cur = c.conn.execute(
-        "INSERT INTO overrides (kind, source, payload_json, started_at, expires_at)"
-        " VALUES (?,?,?,?,?)",
-        (kind, f"ui:{p.username}", body.model_dump_json(), _iso(now), _iso(exp)),
-    )
-    c.audit(p, "override_start", request, **body.model_dump(mode="json"))
+    command_status = None if body.pause else "pending"
+    c.conn.execute("BEGIN")
+    try:
+        c.conn.execute(
+            "UPDATE overrides SET ended_at=?, end_reason='replaced' WHERE ended_at IS NULL",
+            (_iso(now),),
+        )
+        cur = c.conn.execute(
+            "INSERT INTO overrides (kind, source, payload_json, started_at, expires_at)"
+            " VALUES (?,?,?,?,?)",
+            (kind, f"ui:{p.username}", body.model_dump_json(), _iso(now), _iso(exp)),
+        )
+        if cur.lastrowid is None:
+            raise sqlite3.DatabaseError("override insert returned no id")
+        override_id = int(cur.lastrowid)
+        if command_status:
+            db.write_kv(c.conn, override_command_key(override_id), command_status, now=now)
+        c.audit(p, "override_start", request, **body.model_dump(mode="json"))
+        c.conn.execute("COMMIT")
+    except Exception:
+        c.conn.execute("ROLLBACK")
+        raise
     c.replan()
-    return OverrideOut(id=int(cur.lastrowid or 0), kind=kind, started_at=now, expires_at=exp)
+    return OverrideOut(
+        id=override_id, kind=kind, started_at=now, expires_at=exp, command_status=command_status
+    )
 
 
 @router.delete("/api/override", response_model=OkOut)

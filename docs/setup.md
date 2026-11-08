@@ -50,6 +50,31 @@ sign-in when no configuration exists, or opens it from the dashboard banner (or 
 The wizard only reads from Home Assistant (`GET /api/config`, `GET /api/states`, cached 15 s,
 5 s timeout). It never calls a Home Assistant service.
 
+## Temperature overrides
+
+The dashboard can pause the plan or request a temporary temperature and/or HVAC mode. Temperature
+requests use °F and require an ACTIVE bot, the enabled HA mirror, a fresh thermostat reading, and
+the normal safety and write-rate guards. Home Assistant must report the thermostat's setpoint
+range and increment; an explicitly non-Fahrenheit thermostat is not supported.
+
+In heat/cool mode the target is the center of a range at least as wide as the configured deadband.
+The range is rounded outward to the device's increment, and safety limits may adjust it further.
+The status shows the actual confirmed setpoints or why the request was blocked. Some device
+increments and safety limits may be incompatible, in which case no setpoint is sent.
+
+An override is sent once, not repeatedly maintained: later changes at the thermostat are left
+alone. Failed or interrupted requests are not retried automatically; if the status is failed,
+sending, or unconfirmed, check the thermostat before requesting another change. A legacy request
+without a command status is treated as unconfirmed rather than replayed after an update.
+
+Requests more than three minutes old are blocked rather than sent. If Home Assistant is offline,
+the status can remain pending until control resumes and checks the request's age. API requests
+using an `until` time must include a timezone, and a pause cannot be combined with a target or mode.
+
+The planned schedule remains paused while an override is open, including when its command is
+blocked or fails. Cancel it to resume planning. Cancellation cannot recall a command already
+sent to Home Assistant or undo a thermostat change.
+
 ## Turning the bot off
 
 When disabling the bot, **Restore to band** only writes after Home Assistant confirms the

@@ -53,6 +53,17 @@ def test_missing_row_disabled(tmp_path: Path) -> None:
     assert db.read_bot_state(conn) is None
 
 
+@pytest.mark.brd("NFR-SAFE-9")
+def test_compare_and_set_kv_requires_current_value_and_valid_checksum(tmp_path: Path) -> None:
+    conn = db.open_db(tmp_path / "t.db", now=T0)
+    db.write_kv(conn, "command", "pending", now=T0)
+    assert db.compare_and_set_kv(conn, "command", "pending", "sending", now=T0)
+    assert not db.compare_and_set_kv(conn, "command", "pending", "sending", now=T0)
+    conn.execute("UPDATE bot_kv SET value='pending' WHERE key='command'")
+    assert not db.compare_and_set_kv(conn, "command", "pending", "sending", now=T0)
+    assert db.read_kv(conn, "command") is None
+
+
 @pytest.mark.brd("FR-KILL-4")
 def test_unopenable_file_renamed(tmp_path: Path) -> None:
     f = tmp_path / "t.db"

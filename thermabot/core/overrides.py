@@ -16,6 +16,13 @@ TZ = ZoneInfo("America/New_York")
 Role = Literal["owner", "admin", "member", "viewer"]
 
 _HOURS = {"1h": 1, "2h": 2, "4h": 4}
+OVERRIDE_COMMAND_STATES = frozenset(
+    {"pending", "sending", "applied", "failed", "blocked", "matched"}
+)
+
+
+def override_command_key(override_id: int) -> str:
+    return f"override_command:{override_id}"
 
 
 class Override(BaseModel):
@@ -35,8 +42,8 @@ def override_expiry(
         return now + timedelta(hours=_HOURS[duration])
     if duration == "next_block":
         return next_boundary(sched, now)
-    if until is None or until <= now:
-        raise ValueError("'until' needs a future datetime")
+    if until is None or until.utcoffset() is None or until <= now:
+        raise ValueError("'until' needs a future datetime with timezone")
     return until
 
 

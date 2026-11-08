@@ -76,11 +76,13 @@ async def test_killed_mid_precondition_leaves_livable_setpoint(
     lo, hi = hold_setpoints(band, s.writes.deadband_f)
     conn = db.open_db(tmp_path / "t.db", now=NOW)
     kill_on(conn)
-    ha = MockHA()
+    ha = mirror_on(MockHA())
     rest = HARest(
         "http://ha", GOOD_TOKEN, transport=httpx.ASGITransport(app=ha.app), writable_entity=TSTAT
     )
-    c = Controller(conn, rest, settings=s, bot_user_id=BOT_USER_ID, sleep=Sleeps())
+    c = Controller(
+        conn, rest, settings=s, bot_user_id=BOT_USER_ID, sleep=Sleeps(), clock=lambda: NOW
+    )
     th = ThermostatState(
         hvac_mode="heat_cool",
         current_temp=71,
