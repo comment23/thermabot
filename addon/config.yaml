@@ -1,5 +1,5 @@
 name: thermabot
-version: "0.6.8-rc.4"
+version: "0.6.8-rc.5"
 slug: thermabot
 description: >-
   Shadow-first HVAC control and automation bot. Install, let it watch for 7 days in

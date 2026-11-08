@@ -1,6 +1,6 @@
 # thermabot add-on changelog
 
-## Unreleased
+## 0.6.8-rc.5 (unreleased candidate)
 
 - Apply dashboard temperature and mode overrides once through the guarded thermostat path,
   and show the request outcome. Requests that have waited over three minutes are not sent.

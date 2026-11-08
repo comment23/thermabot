@@ -13,7 +13,7 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.4](CHANGELOG.md#068-rc4---2026-10-30-prerelease) | Current public source snapshot; not a stable release |
+| Prerelease | [v0.6.8-rc.5](CHANGELOG.md#068-rc5---unreleased-prerelease-candidate) | Unreleased source candidate; not a stable release |
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -78,7 +78,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on currently supports **amd64**. The public source snapshot is a prerelease, not a
 stable production release. The in-app version is the application version (`0.6.8`); the
-Home Assistant add-on catalog marks this build as `0.6.8-rc.4`. See
+Home Assistant add-on catalog marks this build as `0.6.8-rc.5`. See
 [first-run setup](docs/setup.md) for the wizard and operating details.
 
 ### Docker Compose (fallback)
