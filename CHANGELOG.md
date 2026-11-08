@@ -1,9 +1,19 @@
 # Changelog
 
-Published application release history. Prereleases are explicitly labeled; they are not
+Application releases and unreleased changes. Prereleases are explicitly labeled; they are not
 stable releases and do not satisfy any documented live-soak or owner-review gate. Release
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
+
+## Unreleased
+
+- Send dashboard temperature and mode overrides through the guarded thermostat write path.
+  Show whether each request was confirmed, blocked, failed, or remains unconfirmed.
+- Send each manual request at most once and block requests older than three minutes rather
+  than executing them after an extended outage. Device capabilities and safety limits can
+  adjust or block requested setpoints.
+- Recheck the kill switch, Home Assistant enable mirror, run mode, and open overrides before
+  planned writes and retries.
 
 ## 0.6.8-rc.4 - 2026-10-30 (prerelease)
 

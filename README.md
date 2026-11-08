@@ -28,7 +28,8 @@ authorize enabling thermostat control. See [CHANGELOG.md](CHANGELOG.md) for rele
 - The kill switch is off and the run mode defaults to **SHADOW**. SHADOW simulates decisions
   and sends no thermostat writes.
 - Thermostat commands pass through one controller path, safety guards, and an entity/service
-  allowlist. The bot does not automatically resume control after a Home Assistant outage.
+  allowlist. Writes stop while Home Assistant is unavailable; they may resume after it recovers
+  if the bot is still ACTIVE and its enable mirror is on.
 - The Home Assistant heartbeat-loss package is optional. It can disable the enable mirror and
   notify, but it never writes thermostat settings and cannot run while Home Assistant itself
   is unavailable.

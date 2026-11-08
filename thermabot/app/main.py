@@ -106,12 +106,22 @@ def thermostat(st: dict[str, Any], read_at: datetime | None = None) -> Thermosta
     else:
         # parse_last_reported() returns None when the dict has no 'state', so pass it.
         seen = parse_last_reported(st)
+    single_sp = _num(a.get("temperature"))
     return ThermostatState(
         hvac_mode=mode,
         hvac_action=a.get("hvac_action"),
         current_temp=_num(a.get("current_temperature")),
-        heat_sp=_num(a.get("target_temp_low")),
-        cool_sp=_num(a.get("target_temp_high")),
+        heat_sp=single_sp
+        if mode.lower() == "heat" and single_sp is not None
+        else _num(a.get("target_temp_low")),
+        cool_sp=single_sp
+        if mode.lower() == "cool" and single_sp is not None
+        else _num(a.get("target_temp_high")),
+        min_temp=_num(a.get("min_temp")),
+        max_temp=_num(a.get("max_temp")),
+        target_temp_step=_num(a.get("target_temp_step")),
+        temperature_unit=str(a.get("temperature_unit") or a.get("unit_of_measurement") or "")
+        or None,
         fan_mode=a.get("fan_mode"),
         preset_mode=a.get("preset_mode"),
         humidity=_num(a.get("current_humidity")),
@@ -817,7 +827,7 @@ def build(
         transport=ha_transport,
         writable_entity=ctx.settings.thermostat.entity_id,
     )
-    controller = Controller(conn, ha, settings=ctx.settings)
+    controller = Controller(conn, ha, settings=ctx.settings, clock=clock)
     ctx.ha_read, ctx.ha_url = ha, env.HA_URL  # setup wizard: reads only (never the token)
     ctx.running_entity = ctx.settings.thermostat.entity_id
     load, save = slot_store(conn)

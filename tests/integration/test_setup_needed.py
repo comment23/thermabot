@@ -87,13 +87,16 @@ def _controller(tmp: Path, settings: Settings) -> tuple[Controller, MockHA]:
         now=NOW,
     )
     ha = MockHA()
+    ha.states["input_boolean.thermabot_enabled"]["state"] = "on"
     rest = HARest(
         "http://ha",
         GOOD_TOKEN,
         transport=httpx.ASGITransport(app=ha.app),
         writable_entity=settings.thermostat.entity_id,
     )
-    c = Controller(conn, rest, settings=settings, bot_user_id=BOT_USER_ID, sleep=Sleeps())
+    c = Controller(
+        conn, rest, settings=settings, bot_user_id=BOT_USER_ID, sleep=Sleeps(), clock=lambda: NOW
+    )
     return c, ha
 
 

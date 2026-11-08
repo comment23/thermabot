@@ -34,6 +34,8 @@ def test_override_next_block_and_until() -> None:
     assert start_override(NOW, S, "until", until=until).expires_at == until
     with pytest.raises(ValueError):
         start_override(NOW, S, "until", until=NOW)
+    with pytest.raises(ValueError):
+        start_override(NOW, S, "until", until=until.replace(tzinfo=None))
 
 
 @pytest.mark.brd("FR-OVR-3")

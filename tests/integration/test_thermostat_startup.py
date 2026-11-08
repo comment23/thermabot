@@ -135,6 +135,7 @@ def _controller(tmp: Path, settings: Settings | None, writable: str) -> tuple[Co
         now=NOW,
     )
     ha = MockHA()
+    ha.states["input_boolean.thermabot_enabled"]["state"] = "on"
     ha.states[OTHER] = copy.deepcopy(ha.states[OLD])  # a second climate entity
     rest = HARest(
         "http://ha",
@@ -142,7 +143,9 @@ def _controller(tmp: Path, settings: Settings | None, writable: str) -> tuple[Co
         transport=httpx.ASGITransport(app=ha.app),
         writable_entity=writable,
     )
-    c = Controller(conn, rest, settings=settings, bot_user_id=BOT_USER_ID, sleep=Sleeps())
+    c = Controller(
+        conn, rest, settings=settings, bot_user_id=BOT_USER_ID, sleep=Sleeps(), clock=lambda: NOW
+    )
     return c, ha
 
 

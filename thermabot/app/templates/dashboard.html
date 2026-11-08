@@ -110,17 +110,35 @@
 {% if p.can('override') %}
 <section class="card" id="override-tools" data-testid="override-controls">
   <h3>Override</h3>
-  <form data-api="POST api/override" data-done="Override started" data-reload>
+  <form data-api="POST api/override" data-done="Override requested; refresh to check status" data-reload>
     <div class="grid">
-      <label>Target °F <input type="number" name="target_f" min="60" max="82" step="1"></label>
+      <label>Target °F <input type="number" name="target_f" min="60" max="82" step="1">
+        <small>In heat/cool mode this is the midpoint; the device step and safety limits can adjust the range.</small></label>
       <label>Mode <select name="mode"><option value="">(keep)</option>
         {% for m in ['heat', 'cool', 'heat_cool', 'off'] %}<option>{{ m }}</option>{% endfor %}</select></label>
       <label>Duration <select name="duration">{% for d in settings.override.choices if d != 'until' %}
         <option{% if d == settings.override.default %} selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
     </div>
+    <small>Changes are sent once; later manual thermostat changes are not reset by this override.
+      Cancelling cannot recall a change already sent to the thermostat.</small>
     <p class="errors"></p>
     <button type="submit" data-testid="override-start">Start override</button>
   </form>
+  {% if override and override.command_status %}
+  <p data-testid="override-command-status" role="status">
+    {% if override.command_status == 'pending' %}Awaiting the next control cycle and safety checks.
+      Requests older than three minutes will be blocked rather than sent.
+    {% elif override.command_status == 'sending' %}Thermostat change is in progress or unconfirmed.
+      Check the thermostat before retrying.
+    {% elif override.command_status == 'applied' %}Thermostat change confirmed.
+      {% if override.command_detail %}{{ override.command_detail }}.{% endif %}
+    {% elif override.command_status == 'matched' %}The thermostat already matches the supported settings.
+      {% if override.command_detail %}{{ override.command_detail }}.{% endif %}
+    {% elif override.command_status == 'blocked' %}Not applied: {{ override.command_detail or 'safety checks blocked the request' }}.
+    {% elif override.command_status == 'failed' %}Thermostat change was not confirmed. Check the thermostat and alerts before retrying.
+    {% else %}The request is unconfirmed. Check the thermostat and start a new override if needed.{% endif %}
+  </p>
+  {% endif %}
   {% if override %}<button class="secondary" data-api="DELETE api/override" data-done="Override cancelled"
     data-reload data-testid="override-cancel">Cancel override</button>{% endif %}
 </section>

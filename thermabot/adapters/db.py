@@ -157,6 +157,26 @@ def write_kv(conn: sqlite3.Connection, key: str, value: str, now: datetime | Non
     )
 
 
+def compare_and_set_kv(
+    conn: sqlite3.Connection, key: str, expected: str, value: str, now: datetime | None = None
+) -> bool:
+    return (
+        conn.execute(
+            "UPDATE bot_kv SET value=?, updated_at=?, checksum=?"
+            " WHERE key=? AND value=? AND checksum=?",
+            (
+                value,
+                _iso(now or _now()),
+                _kv_sum(key, value),
+                key,
+                expected,
+                _kv_sum(key, expected),
+            ),
+        ).rowcount
+        == 1
+    )
+
+
 def audit(
     conn: sqlite3.Connection,
     actor: str,

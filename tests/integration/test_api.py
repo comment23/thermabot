@@ -15,6 +15,7 @@ from thermabot.app import jobs as J
 from thermabot.app.auth import CSRF_HEADER, Auth, create_user
 from thermabot.app.routes_api import Ctx, create_app
 from thermabot.app.sse import Broker, stream
+from thermabot.core.overrides import override_command_key
 from thermabot.core.statemachine import Live, Persisted
 from thermabot.core.types import Plan, PlanStep, Snapshot, ThermostatState
 
@@ -153,12 +154,92 @@ def test_override_start_cancel_audited(tmp_path: Path) -> None:
     h = login(c, "ann")
     r = c.post("/api/override", json={"target_f": 70, "duration": "1h"}, headers=h)
     assert r.status_code == 200 and r.json()["kind"] == "ui_target"
+    assert r.json()["command_status"] == "pending"
+    assert db.read_kv(ctx.conn, override_command_key(r.json()["id"])) == "pending"
+    assert c.get("/api/status").json()["override"]["command_status"] == "pending"
+    assert (
+        c.post(
+            "/api/override",
+            json={"target_f": 70, "mode": "off", "duration": "1h"},
+            headers=h,
+        ).status_code
+        == 422
+    )
+    assert c.post("/api/override", json={"target_f": 83}, headers=h).status_code == 422
+    assert c.post("/api/override", json={"target_f": "NaN"}, headers=h).status_code == 422
     assert c.get("/api/status").json()["state"] == "OVERRIDE"
     assert c.post("/api/override", json={"duration": "1h"}, headers=h).status_code == 422
     assert c.delete("/api/override", headers=h).status_code == 200
     assert c.get("/api/status").json()["state"] == "SHADOW"
     acts = [r[0] for r in ctx.conn.execute("SELECT action FROM audit WHERE actor='ann'")]
     assert "override_start" in acts and "override_cancel" in acts and len(replans) == 2
+
+
+def test_override_replacement_rolls_back_if_audit_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, _, c = make(tmp_path)
+    h = login(c, "ann")
+    first = c.post("/api/override", json={"target_f": 70}, headers=h).json()
+
+    def fail_audit(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("audit failure")
+
+    monkeypatch.setattr(ctx, "audit", fail_audit)
+    with pytest.raises(RuntimeError, match="audit failure"):
+        c.post("/api/override", json={"target_f": 71}, headers=h)
+    current = ctx.open_override()
+    assert current is not None and current.id == first["id"]
+    assert db.read_kv(ctx.conn, override_command_key(current.id)) == "pending"
+    assert ctx.conn.execute("SELECT COUNT(*) FROM overrides").fetchone()[0] == 1
+
+
+@pytest.mark.brd("FR-OVR-2")
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"pause": True, "target_f": 70},
+        {"pause": True, "mode": "heat"},
+        {"target_f": 70, "duration": "until", "until": "2026-10-05T19:00:00"},
+    ],
+)
+def test_override_rejects_ambiguous_or_naive_input(tmp_path: Path, body: dict[str, object]) -> None:
+    ctx, _, c = make(tmp_path)
+    h = login(c, "ann")
+
+    assert c.post("/api/override", json=body, headers=h).status_code == 422
+    assert ctx.open_override() is None
+
+
+@pytest.mark.brd("FR-OVR-2")
+@pytest.mark.parametrize(
+    ("raw", "status", "detail"),
+    [
+        ("pending", "pending", None),
+        ("sending", "sending", None),
+        ("applied:heat 68F, cool 72F", "applied", "heat 68F, cool 72F"),
+        ("matched:target 70F", "matched", "target 70F"),
+        ("blocked:shadow mode", "blocked", "shadow mode"),
+        ("failed", "failed", None),
+        (None, "unconfirmed", None),
+        ("unexpected", "unconfirmed", None),
+    ],
+)
+def test_override_status_exposes_command_result(
+    tmp_path: Path, raw: str | None, status: str, detail: str | None
+) -> None:
+    ctx, _, c = make(tmp_path)
+    h = login(c, "ann")
+    response = c.post("/api/override", json={"target_f": 70}, headers=h)
+    key = override_command_key(response.json()["id"])
+    if raw is None:
+        ctx.conn.execute("DELETE FROM bot_kv WHERE key=?", (key,))
+    else:
+        db.write_kv(ctx.conn, key, raw, now=NOW)
+
+    override = c.get("/api/status").json()["override"]
+    assert override["command_status"] == status
+    assert override["command_detail"] == detail
 
 
 @pytest.mark.brd("FR-CMF-6")

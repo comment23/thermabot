@@ -1,6 +1,20 @@
 import pytest
 
 
+@pytest.mark.brd("FR-HA-4")
+@pytest.mark.parametrize(("mode", "field"), [("heat", "heat_sp"), ("cool", "cool_sp")])
+def test_single_mode_uses_temperature_for_active_setpoint(mode: str, field: str) -> None:
+    from thermabot.app.main import thermostat
+
+    th = thermostat(
+        {
+            "state": mode,
+            "attributes": {"temperature": 70, "target_temp_low": 68, "target_temp_high": 76},
+        }
+    )
+    assert getattr(th, field) == 70
+
+
 @pytest.mark.brd("NFR-SAFE-6")
 def test_thermostat_last_reported_parsed_from_ha_state() -> None:
     """Regression: parse_last_changed needs 'state'; without it every tick was DEGRADED (ha)."""

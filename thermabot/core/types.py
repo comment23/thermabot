@@ -66,6 +66,10 @@ class ThermostatState(BaseModel):
     current_temp: float | None = None
     heat_sp: float | None = None
     cool_sp: float | None = None
+    min_temp: float | None = None
+    max_temp: float | None = None
+    target_temp_step: float | None = None
+    temperature_unit: str | None = None
     fan_mode: str | None = None
     preset_mode: str | None = None
     humidity: float | None = None
@@ -169,6 +173,11 @@ class OverrideOut(BaseModel):
     kind: str
     started_at: datetime
     expires_at: datetime
+    command_status: (
+        Literal["pending", "sending", "applied", "failed", "blocked", "matched", "unconfirmed"]
+        | None
+    ) = None
+    command_detail: str | None = None
 
 
 class StatusOut(BaseModel):
@@ -212,7 +221,7 @@ class KillOut(BaseModel):
 
 
 class OverrideIn(BaseModel):
-    target_f: float | None = None
+    target_f: float | None = Field(default=None, ge=60, le=82, allow_inf_nan=False)
     mode: HvacMode | None = None
     pause: bool = False
     duration: Literal["1h", "2h", "4h", "next_block", "until"] = "2h"
