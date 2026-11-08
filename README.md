@@ -13,7 +13,7 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.5](CHANGELOG.md#068-rc5---unreleased-prerelease-candidate) | Unreleased source candidate; not a stable release |
+| Prerelease | [v0.6.8-rc.5](CHANGELOG.md#068-rc5---2026-11-08-prerelease) | Prerelease source; not a stable release |
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not

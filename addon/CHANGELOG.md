@@ -1,12 +1,12 @@
 # thermabot add-on changelog
 
-## 0.6.8-rc.5 (unreleased candidate)
+## 0.6.8-rc.5 - 2026-11-08 (prerelease)
 
 - Apply dashboard temperature and mode overrides once through the guarded thermostat path,
   and show the request outcome. Requests that have waited over three minutes are not sent.
 - Recheck write authorization before planned writes and retries.
 
-## 0.6.8 (release candidate; latest v0.6.8-rc.4)
+## 0.6.8 (earlier release candidates through v0.6.8-rc.4)
 
 - Refresh the Home Assistant base image and remove build-only tools from the add-on runtime.
 - Refresh the add-on icon and logo to match the Thermabot web interface.

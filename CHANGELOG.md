@@ -5,7 +5,7 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
-## 0.6.8-rc.5 - Unreleased (prerelease candidate)
+## 0.6.8-rc.5 - 2026-11-08 (prerelease)
 
 - Send dashboard temperature and mode overrides through the guarded thermostat write path.
   Show whether each request was confirmed, blocked, failed, or remains unconfirmed.
