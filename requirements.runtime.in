@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 jinja2
-pydantic>=2
+pydantic>=2.14.3
 pydantic-settings
 httpx
 websockets
