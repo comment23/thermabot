@@ -3,12 +3,12 @@ from __future__ import annotations
 from playwright.sync_api import Page, expect
 
 from tests.e2e.conftest import Srv, assert_page_healthy, login
-from tests.house import HOUSE
+from tests.house import house_settings
 from thermabot.config import Settings
 
 
 def _configured(srv: Srv) -> None:
-    data = HOUSE.model_dump(mode="json")
+    data = house_settings().model_dump(mode="json")
     data["presence"] = {"people": {}, "excluded": []}
     data["seasonal_control"] = {"enabled": True, "home": [70, 73], "sleep": [68, 70]}
     data["display"]["units"] = "C"
