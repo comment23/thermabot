@@ -17,7 +17,7 @@ Band = tuple[float, float]
 
 def block_band(s: Settings, season: Season, block: BlockName) -> Band:
     """[L, H] for the block. Shoulder: heating low edge + cooling high edge (D§5.2)."""
-    if s.seasonal_control.enabled and block in ("home", "sleep"):
+    if s.seasonal_control.enabled:
         return seasonal_band(s, block)
     heat: Band = getattr(s.bands.heat, block)
     cool: Band = getattr(s.bands.cool, block)

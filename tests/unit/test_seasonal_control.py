@@ -198,6 +198,8 @@ def test_sleep_responds_to_both_comfort_bounds_in_shoulder_weather(
 
 def test_away_uses_energy_saving_legacy_bounds_not_heating_comfort_upper_edge() -> None:
     now = local(2026, 11, 10, 19)
+    for season in ("heat", "cool", "shoulder"):
+        assert block_band(seasonal_settings(), season, "away") == (62, 80)
     for confidence in ("ok", "low"):
         p = plan(
             PlanInputs(
