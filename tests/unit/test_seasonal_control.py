@@ -48,6 +48,7 @@ def forecast(now, temp):  # type: ignore[no-untyped-def]
     )
 
 
+@pytest.mark.brd("FR-CMF-1")
 def test_comfort_bands_are_independent_of_automatic_mode_deadband() -> None:
     s = seasonal_settings()
     seasons: tuple[Season, ...] = ("heat", "cool", "shoulder")
@@ -63,6 +64,7 @@ def test_comfort_bands_are_independent_of_automatic_mode_deadband() -> None:
     ("outdoor", "mode", "home_setpoint", "sleep_setpoint"),
     [(45, "heat", 70, 68), (85, "cool", 73, 70)],
 )
+@pytest.mark.brd("FR-CMF-1")
 def test_weather_selects_single_mode_without_early_sleep_preconditioning(
     outdoor: float, mode: str, home_setpoint: float, sleep_setpoint: float
 ) -> None:
@@ -89,6 +91,7 @@ def test_weather_selects_single_mode_without_early_sleep_preconditioning(
     assert not any(step.reason.startswith("precondition") for step in p.steps)
 
 
+@pytest.mark.brd("FR-CMF-1")
 def test_shoulder_sleep_uses_a_single_mode_at_the_requested_bound() -> None:
     now = local(2026, 11, 10, 23)
     p = plan(
@@ -104,6 +107,7 @@ def test_shoulder_sleep_uses_a_single_mode_at_the_requested_bound() -> None:
     assert (step.hvac_mode, step.heat_sp, step.cool_sp) == ("heat", 68, None)
 
 
+@pytest.mark.brd("FR-PLN-7")
 def test_low_confidence_still_uses_forecast_season_and_requested_band() -> None:
     now = local(2026, 11, 10, 19)
     p = plan(
@@ -121,6 +125,7 @@ def test_low_confidence_still_uses_forecast_season_and_requested_band() -> None:
     assert (p.steps[0].hvac_mode, p.steps[0].heat_sp, p.steps[0].cool_sp) == ("heat", 70, None)
 
 
+@pytest.mark.brd("FR-PLN-7")
 def test_missing_forecast_preserves_single_mode_and_uses_requested_band() -> None:
     now = local(2026, 11, 10, 19)
     p = plan(
@@ -137,6 +142,7 @@ def test_missing_forecast_preserves_single_mode_and_uses_requested_band() -> Non
     assert (p.steps[0].hvac_mode, p.steps[0].heat_sp, p.steps[0].cool_sp) == ("heat", 70, None)
 
 
+@pytest.mark.brd("FR-PLN-7")
 def test_missing_forecast_and_indoor_temperature_use_safe_widened_band() -> None:
     now = local(2026, 11, 10, 23)
     p = fallback_plan(
@@ -157,6 +163,7 @@ def test_missing_forecast_and_indoor_temperature_use_safe_widened_band() -> None
     ("outdoor", "indoor", "mode", "target"),
     [(85, 69, "heat", 70), (45, 74, "cool", 73), (64, 69, "heat", 70), (64, 74, "cool", 73)],
 )
+@pytest.mark.brd("FR-CMF-1")
 def test_indoor_comfort_takes_precedence_over_the_weather_preference(
     confidence: str, outdoor: float, indoor: float, mode: str, target: float
 ) -> None:
@@ -178,6 +185,7 @@ def test_indoor_comfort_takes_precedence_over_the_weather_preference(
 
 
 @pytest.mark.parametrize(("indoor", "mode", "target"), [(67, "heat", 68), (71, "cool", 70)])
+@pytest.mark.brd("FR-CMF-1")
 def test_sleep_responds_to_both_comfort_bounds_in_shoulder_weather(
     indoor: float, mode: str, target: float
 ) -> None:
@@ -196,6 +204,7 @@ def test_sleep_responds_to_both_comfort_bounds_in_shoulder_weather(
     assert (first.heat_sp if mode == "heat" else first.cool_sp) == target
 
 
+@pytest.mark.brd("FR-CMF-1")
 def test_away_uses_energy_saving_legacy_bounds_not_heating_comfort_upper_edge() -> None:
     now = local(2026, 11, 10, 19)
     for season in ("heat", "cool", "shoulder"):
@@ -215,6 +224,7 @@ def test_away_uses_energy_saving_legacy_bounds_not_heating_comfort_upper_edge() 
         assert (p.steps[0].hvac_mode, p.steps[0].heat_sp) == ("heat", 62)
 
 
+@pytest.mark.brd("FR-PLN-7")
 def test_missing_forecast_still_corrects_an_out_of_range_indoor_temperature() -> None:
     now = local(2026, 11, 10, 19)
     p = plan(
@@ -229,6 +239,7 @@ def test_missing_forecast_still_corrects_an_out_of_range_indoor_temperature() ->
     assert (p.steps[0].hvac_mode, p.steps[0].cool_sp) == ("cool", 73)
 
 
+@pytest.mark.brd("FR-CMF-1")
 def test_off_is_not_chosen_to_leave_an_occupied_house_outside_its_band() -> None:
     now = local(2026, 11, 10, 19)
     p = plan(PlanInputs(now=now, t0=74, forecast=forecast(now, 64), settings=seasonal_settings()))
@@ -238,12 +249,14 @@ def test_off_is_not_chosen_to_leave_an_occupied_house_outside_its_band() -> None
 @pytest.mark.parametrize(
     ("outdoor", "expected"), [(59, "heat"), (60, "shoulder"), (68, "shoulder"), (69, "cool")]
 )
+@pytest.mark.brd("FR-CMF-1")
 def test_forecast_thresholds_include_shoulder_boundaries(outdoor: float, expected: str) -> None:
     now = local(2026, 11, 10, 19)
     s = seasonal_settings()
     assert forecast_season(forecast(now, outdoor), now, s.season, s.weather) == expected
 
 
+@pytest.mark.brd("FR-WX-3")
 def test_stale_or_no_near_term_forecast_has_no_weather_preference() -> None:
     now = local(2026, 11, 10, 19)
     s = seasonal_settings()
@@ -257,6 +270,7 @@ def test_stale_or_no_near_term_forecast_has_no_weather_preference() -> None:
     assert forecast_season(distant, now, s.season, s.weather) is None
 
 
+@pytest.mark.brd("FR-PLN-7")
 def test_projection_uses_seasonal_fallback_and_indoor_correction() -> None:
     now = local(2026, 11, 10, 19)
     projection = project(
@@ -273,6 +287,7 @@ def test_projection_uses_seasonal_fallback_and_indoor_correction() -> None:
     assert (projection.hours[0].mode, projection.hours[0].heat_sp) == ("heat", 70)
 
 
+@pytest.mark.brd("NFR-SAFE-1")
 def test_seasonal_mode_changes_do_not_bypass_the_existing_rate_limit() -> None:
     now = local(2026, 11, 10, 19)
     s = seasonal_settings()
@@ -306,6 +321,7 @@ def test_seasonal_mode_changes_do_not_bypass_the_existing_rate_limit() -> None:
     assert "mode change" in decision.reason
 
 
+@pytest.mark.brd("NFR-SAFE-1")
 def test_seasonal_mode_changes_do_not_bypass_the_daily_flip_limit() -> None:
     now = local(2026, 11, 10, 19)
     s = seasonal_settings()
@@ -345,6 +361,7 @@ def test_seasonal_mode_changes_do_not_bypass_the_daily_flip_limit() -> None:
 
 
 @pytest.mark.parametrize(("month", "outdoor", "mode"), [(1, 85, "cool"), (7, 45, "heat")])
+@pytest.mark.brd("FR-CMF-1")
 def test_forecast_wins_over_calendar(month: int, outdoor: float, mode: str) -> None:
     now = local(2026, month, 15, 12)
     p = plan(
@@ -360,6 +377,7 @@ def test_forecast_wins_over_calendar(month: int, outdoor: float, mode: str) -> N
 
 
 @pytest.mark.parametrize(("outdoor", "mode", "temperature"), [(45, "heat", 70), (85, "cool", 73)])
+@pytest.mark.brd("NFR-SAFE-1")
 def test_single_mode_plan_passes_existing_write_guards(
     outdoor: float, mode: str, temperature: float
 ) -> None:
@@ -386,6 +404,7 @@ def test_single_mode_plan_passes_existing_write_guards(
     assert evaluate(action, ctx).allowed
 
 
+@pytest.mark.brd("NFR-SAFE-3")
 def test_safety_restore_keeps_three_degree_deadband() -> None:
     now = local(2026, 11, 10, 23)
     snapshot = Snapshot(
@@ -403,11 +422,13 @@ def test_safety_restore_keeps_three_degree_deadband() -> None:
 @pytest.mark.parametrize(
     "band", [[74, 73], [59, 73], [68, 81], [65, 67], [float("nan"), 73], [70, float("inf")]]
 )
+@pytest.mark.brd("FR-CMF-1")
 def test_invalid_seasonal_comfort_band_is_rejected(band: list[float]) -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate({"seasonal_control": {"enabled": True, "home": band}})
 
 
+@pytest.mark.brd("FR-CFG-1")
 def test_settings_form_exposes_comfort_temperatures_in_display_units() -> None:
     s = seasonal_settings()
     s.display.units = "C"
@@ -419,6 +440,7 @@ def test_settings_form_exposes_comfort_temperatures_in_display_units() -> None:
     assert fields["seasonal_control.home.0"].f_value == 70
 
 
+@pytest.mark.brd("FR-CFG-1")
 def test_legacy_config_export_can_be_imported_without_enabling_the_new_policy() -> None:
     now = local(2026, 11, 10)
     values = Settings().model_dump(mode="json")
@@ -434,6 +456,7 @@ def test_legacy_config_export_can_be_imported_without_enabling_the_new_policy() 
 
 
 @pytest.mark.parametrize("problem", ["extra_section", "missing_other", "missing_both"])
+@pytest.mark.brd("FR-CFG-1")
 def test_legacy_import_still_rejects_unexpected_or_missing_sections(problem: str) -> None:
     values = Settings().model_dump(mode="json")
     if problem == "extra_section":
@@ -454,6 +477,7 @@ def test_legacy_import_still_rejects_unexpected_or_missing_sections(problem: str
     assert exc.value.status_code == 422
 
 
+@pytest.mark.brd("FR-CMF-1")
 def test_disabled_weather_aware_settings_do_not_change_legacy_plans() -> None:
     now = local(2026, 11, 10, 19)
     legacy = Settings()

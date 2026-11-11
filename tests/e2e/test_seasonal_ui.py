@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.conftest import Srv, assert_page_healthy, login
@@ -15,6 +16,7 @@ def _configured(srv: Srv) -> None:
     srv.ctx.settings = Settings.model_validate(data)
 
 
+@pytest.mark.brd("FR-CFG-1")
 def test_weather_aware_settings_round_trip_in_celsius(page: Page, srv: Srv) -> None:
     _configured(srv)
     login(page, srv, "alex")
@@ -30,6 +32,7 @@ def test_weather_aware_settings_round_trip_in_celsius(page: Page, srv: Srv) -> N
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-CFG-1")
 def test_wizard_edits_and_reviews_active_ranges_without_resetting_them(
     page: Page, srv: Srv
 ) -> None:

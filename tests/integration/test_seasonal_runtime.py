@@ -30,6 +30,7 @@ def seasonal_settings() -> Settings:
     ("old_mode", "indoor", "new_mode", "target"),
     [("cool", 69, "heat", 70), ("heat", 74, "cool", 73)],
 )
+@pytest.mark.brd("FR-PLN-1")
 async def test_tick_replans_before_a_stale_mode_can_worsen_comfort(
     tmp_path: Path, old_mode: str, indoor: float, new_mode: str, target: float
 ) -> None:
@@ -76,6 +77,7 @@ async def test_tick_replans_before_a_stale_mode_can_worsen_comfort(
         ("temperature_unit", "°C"),
     ],
 )
+@pytest.mark.brd("FR-HA-4")
 async def test_seasonal_plan_refuses_incompatible_device_capabilities(
     tmp_path: Path, attribute: str, value: object
 ) -> None:
@@ -90,6 +92,7 @@ async def test_seasonal_plan_refuses_incompatible_device_capabilities(
     assert outcomes(conn) == ["denied"]
 
 
+@pytest.mark.brd("FR-HA-4")
 async def test_seasonal_plan_rechecks_capabilities_before_changing_mode(tmp_path: Path) -> None:
     c, ha, _, conn = setup(tmp_path)
     c.settings = seasonal_settings()
@@ -101,6 +104,7 @@ async def test_seasonal_plan_rechecks_capabilities_before_changing_mode(tmp_path
     assert outcomes(conn) == ["failed"]
 
 
+@pytest.mark.brd("FR-HA-4")
 async def test_seasonal_plan_rechecks_capabilities_after_changing_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -124,6 +128,7 @@ async def test_seasonal_plan_rechecks_capabilities_after_changing_mode(
     assert outcomes(conn) == ["failed"]
 
 
+@pytest.mark.brd("FR-HA-4")
 async def test_seasonal_plan_requires_exact_setpoint_readback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -147,6 +152,7 @@ async def test_seasonal_plan_requires_exact_setpoint_readback(
     assert c.alerts[0].key == "write_failed"
 
 
+@pytest.mark.brd("FR-CMF-2")
 async def test_schedule_boundary_replans_before_applying_the_previous_block(tmp_path: Path) -> None:
     now = local(2026, 11, 10, 21, 59)
     ha = MockHA()
@@ -177,6 +183,7 @@ async def test_schedule_boundary_replans_before_applying_the_previous_block(tmp_
     await rt.aclose()
 
 
+@pytest.mark.brd("FR-CMF-1")
 async def test_away_boundary_does_not_apply_a_future_occupied_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,6 +221,7 @@ async def test_away_boundary_does_not_apply_a_future_occupied_target(
     await rt.aclose()
 
 
+@pytest.mark.brd("FR-OVR-2")
 async def test_open_override_blocks_the_weather_aware_plan(tmp_path: Path) -> None:
     c, ha, _, conn = setup(tmp_path)
     c.settings = seasonal_settings()
@@ -226,6 +234,7 @@ async def test_open_override_blocks_the_weather_aware_plan(tmp_path: Path) -> No
     assert decisions == [] or all(not decision.allowed for decision in decisions)
 
 
+@pytest.mark.brd("NFR-SAFE-3")
 async def test_safety_restore_still_precedes_an_open_override(tmp_path: Path) -> None:
     c, ha, _, conn = setup(tmp_path)
     c.settings = seasonal_settings()
@@ -240,6 +249,7 @@ async def test_safety_restore_still_precedes_an_open_override(tmp_path: Path) ->
     assert [call["service"] for call in ha.calls] == ["set_hvac_mode", "set_temperature"]
 
 
+@pytest.mark.brd("FR-PLN-7")
 async def test_replan_error_fallback_still_corrects_the_active_range(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
