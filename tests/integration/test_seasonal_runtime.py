@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import local
-from tests.house import HOUSE
+from tests.house import house_settings
 from tests.integration.mock_ha import BOT_USER_ID, MockHA
 from tests.integration.test_controller import LIVE, TSTAT, outcomes, queue_override, setup
 from tests.integration.test_jobs import NOW, Clock, rt_of
@@ -21,7 +21,7 @@ from thermabot.core.types import HouseState, Plan, PlanStep, Presence, Snapshot
 
 
 def seasonal_settings() -> Settings:
-    data = HOUSE.model_dump(mode="json")
+    data = house_settings().model_dump(mode="json")
     data["seasonal_control"] = {"enabled": True, "home": [70, 73], "sleep": [68, 70]}
     return Settings.model_validate(data)
 

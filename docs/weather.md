@@ -71,8 +71,9 @@ safety restores retain their existing priority.
 
 The comfort range is not a guarantee of exact room temperature. The existing write-rate and
 heat/cool reversal limits may delay a mode change, and device increments, reporting delays and
-thermostat hysteresis can cause overshoot. Planned writes are refused if Home Assistant does not
-report a supported HVAC mode, setpoint range and increment, or if a target is incompatible.
+thermostat hysteresis can cause overshoot. Planned mode changes require Home Assistant to report
+the requested mode as supported. Setpoint writes also require a reported range and increment
+that are compatible with the target.
 Home Assistant applies a mode change before its new setpoint; a device may briefly use that
 mode's previous target. If the setpoint write cannot be confirmed, check the thermostat and
 the write-failure alert.
