@@ -37,10 +37,10 @@ def test_compose() -> None:
     assert svc["restart"] == "unless-stopped"
     assert svc["volumes"] == ["../data:/data"]
     assert "8095:8095" in svc["ports"]
-    assert svc["image"] == "thermabot:0.6.8-rc.5"
+    assert svc["image"] == "thermabot:0.6.8-rc.6"
     assert svc["build"]["context"] == ".."
     assert svc["build"]["dockerfile"] == "Dockerfile"
-    assert svc["build"]["args"]["VERSION"] == "v0.6.8-rc.5"
+    assert svc["build"]["args"]["VERSION"] == "v0.6.8-rc.6"
     assert svc["env_file"] == "../.env"
     assert not set(svc.get("environment", {})) & set(SECRETS)  # secrets only via .env
 

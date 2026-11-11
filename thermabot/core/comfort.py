@@ -9,13 +9,16 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from thermabot.config import AuxHeatCfg, BlockName, ComfortCfg, RoomCfg, Settings
-from thermabot.core.types import Season
+from thermabot.core.limits import COOL_SP_MAX
+from thermabot.core.types import HvacMode, Season
 
 Band = tuple[float, float]
 
 
 def block_band(s: Settings, season: Season, block: BlockName) -> Band:
     """[L, H] for the block. Shoulder: heating low edge + cooling high edge (D§5.2)."""
+    if s.seasonal_control.enabled and block in ("home", "sleep"):
+        return seasonal_band(s, block)
     heat: Band = getattr(s.bands.heat, block)
     cool: Band = getattr(s.bands.cool, block)
     if season == "heat":
@@ -23,6 +26,44 @@ def block_band(s: Settings, season: Season, block: BlockName) -> Band:
     if season == "cool":
         return cool
     return (heat[0], cool[1])
+
+
+def hold_setpoints(band: Band, deadband: float) -> Band:
+    """Keep automatic-mode setpoints at least the configured deadband apart."""
+    lo, hi = band
+    hi = max(hi, lo + deadband)
+    if hi > COOL_SP_MAX:
+        hi, lo = float(COOL_SP_MAX), COOL_SP_MAX - deadband
+    return float(lo), float(hi)
+
+
+def seasonal_band(s: Settings, block: BlockName) -> Band:
+    if block == "away":
+        return s.bands.heat.away[0], s.bands.cool.away[1]
+    if block == "sleep":
+        return s.seasonal_control.sleep
+    return s.seasonal_control.home
+
+
+def seasonal_mode(
+    band: Band, indoor_f: float | None, season: Season | None, current_mode: str | None
+) -> HvacMode:
+    if indoor_f is not None and math.isfinite(indoor_f):
+        lo, hi = band
+        if indoor_f < lo:
+            return "heat"
+        if indoor_f > hi:
+            return "cool"
+        if season in ("heat", "cool"):
+            return season
+        if current_mode in ("heat", "cool"):
+            return "heat" if current_mode == "heat" else "cool"
+        return "heat" if indoor_f <= (lo + hi) / 2 else "cool"
+    if season in ("heat", "cool"):
+        return season
+    if current_mode in ("heat", "cool"):
+        return "heat" if current_mode == "heat" else "cool"
+    return "heat_cool"
 
 
 def room_band(

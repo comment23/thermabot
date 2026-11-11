@@ -40,6 +40,8 @@ sign-in when no configuration exists, or opens it from the dashboard banner (or 
    the house always counts as occupied.
 5. **Comfort bands**: low/high per block (home/sleep/away) and season, checked as you go
    (heat high <= cool low; cool high - heat low >= the write deadband, 3 °F by default). Choose °F or °C.
+   When weather-aware comfort is enabled in Settings, the wizard also edits its active home
+   and sleep ranges; the legacy seasonal ranges still provide away settings.
 6. **Weather** (v0.4.0): provider (Open-Meteo, global and keyless, the default; or NWS, US only),
    latitude/longitude (empty = Home Assistant's home location), a **Use HA home location** button
    (reads `GET /api/config`) and a **Test fetch** preview of the next 12 hours. See [weather.md](weather.md).
@@ -110,6 +112,12 @@ save with no edits changes nothing.
 One form per section, generated from the `Settings` model. A save goes through `PUT /api/settings`
 and the same pydantic validation, and errors are shown next to the field. The `thermostat`,
 `safety` and `off` sections need an Owner. Owners also get a read-only JSON view under *Advanced*.
+
+**Weather-aware comfort** is opt-in under Settings. Enable it and set both the home and sleep
+ranges to use those ranges in every season. Review the [weather-aware behavior and safety
+limitations](weather.md#weather-aware-comfort) before enabling it. An older configuration export
+without this section can still be imported; the new policy will be disabled in the imported
+configuration.
 
 ## API (Owner only)
 

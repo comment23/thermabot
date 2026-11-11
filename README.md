@@ -13,7 +13,7 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.5](CHANGELOG.md#068-rc5---2026-11-08-prerelease) | Prerelease source; not a stable release |
+| Prerelease | [v0.6.8-rc.6](CHANGELOG.md#068-rc6---2026-11-10-prerelease) | Prerelease source; not a stable release |
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -44,6 +44,8 @@ contributing.
 
 - Home Assistant setup wizard for thermostat, sensors, presence, comfort bands, and weather.
 - Explainable schedule, comfort, and HVAC status pages with SHADOW-first control safeguards.
+- Optional weather-aware home/sleep comfort bands with indoor-temperature correction and
+  guarded heating/cooling mode selection; see [weather.md](docs/weather.md#weather-aware-comfort).
 - Responsive desktop and mobile dashboard with operating version visible in the UI.
 - Owner-only configuration export/import with validation and a verified pre-import backup.
 - Owner-only SQLite backup download, recovery status, and offline restore guidance.
@@ -78,7 +80,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on currently supports **amd64**. The public source snapshot is a prerelease, not a
 stable production release. The in-app version is the application version (`0.6.8`); the
-Home Assistant add-on catalog marks this build as `0.6.8-rc.5`. See
+Home Assistant add-on catalog marks this build as `0.6.8-rc.6`. See
 [first-run setup](docs/setup.md) for the wizard and operating details.
 
 ### Docker Compose (fallback)

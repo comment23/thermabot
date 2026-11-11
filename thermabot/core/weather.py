@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Literal, Protocol, runtime_checkable
 
-from thermabot.config import WeatherCfg
-from thermabot.core.types import Forecast, ForecastPoint
+from thermabot.config import SeasonCfg, WeatherCfg
+from thermabot.core.schedule import season_from_forecast
+from thermabot.core.types import Forecast, ForecastPoint, Season
 
 
 @runtime_checkable
@@ -39,6 +40,16 @@ def is_stale(fc: Forecast | None, now: datetime, cfg: WeatherCfg | None = None) 
     if now - fc.fetched_at > timedelta(hours=cfg.stale_h):
         return True
     return coverage_h(fc, now) < cfg.min_cover_h
+
+
+def forecast_season(
+    fc: Forecast | None, now: datetime, season_cfg: SeasonCfg, weather_cfg: WeatherCfg
+) -> Season | None:
+    if fc is None or is_stale(fc, now, weather_cfg):
+        return None
+    if not any(now <= point.t < now + timedelta(hours=24) for point in fc.points):
+        return None
+    return season_from_forecast(season_cfg, fc, now)
 
 
 def choose_source(

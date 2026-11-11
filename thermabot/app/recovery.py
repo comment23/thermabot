@@ -78,10 +78,14 @@ def create_backup(c: Ctx, kind: str) -> Path:
 
 
 def checked_settings(document: ConfigFile) -> Settings:
-    if set(document.settings) != set(Settings.model_fields):
+    sections = set(document.settings)
+    current_sections = set(Settings.model_fields)
+    if sections not in (current_sections, current_sections - {"seasonal_control"}):
         raise HTTPException(
             422, "Import must contain every settings section, and no unknown sections"
         )
+    if "seasonal_control" not in sections:
+        log.info("Importing legacy settings with weather-aware comfort disabled")
     try:
         return Settings.model_validate(document.settings, extra="forbid")
     except ValidationError as exc:

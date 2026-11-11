@@ -41,10 +41,11 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta
 
-from thermabot.config import Settings
+from thermabot.config import BlockName, Settings
+from thermabot.core.comfort import hold_setpoints, seasonal_band, seasonal_mode
 from thermabot.core.limits import COOL_SP_MAX, COOL_SP_MIN, HEAT_SP_MIN
 from thermabot.core.schedule import block_at, next_boundary
-from thermabot.core.types import HouseState, Plan, PlanStep
+from thermabot.core.types import HouseState, HvacMode, Plan, PlanStep, Season
 
 _AWAY_BAND_TOL = 0.05  # °F; absorbs HA/SQLite float round-trip noise, not real manual offsets
 
@@ -55,6 +56,9 @@ Current = tuple[str | None, float | None, float | None]
 def fallback_setpoints(s: Settings, block: str) -> tuple[float, float]:
     """heat_cool at the block's band edges: heat = heating-band low, cool = cooling-band high.
     Config validation guarantees this pair respects the deadband and hard limits."""
+    if s.seasonal_control.enabled and block in ("home", "sleep"):
+        band = getattr(s.seasonal_control, block)
+        return hold_setpoints(band, s.writes.deadband_f)
     heat_lo = getattr(s.bands.heat, block)[0]
     cool_hi = getattr(s.bands.cool, block)[1]
     return float(heat_lo), float(cool_hi)
@@ -83,6 +87,8 @@ def fallback_plan(
     current: Current | None = None,
     house: HouseState = HouseState.OCCUPIED,
     away_until: datetime | None = None,
+    season: Season | None = None,
+    indoor_f: float | None = None,
 ) -> Plan:
     """One step per planner step over the horizon; fan auto, heat_cool, no `off`. When
     `house` is EMPTY, steps inside the away window (away_until, else the next schedule
@@ -92,6 +98,10 @@ def fallback_plan(
     is treated as stale away-band residue (the bot's own prior write), not a genuine
     household hold -- see module docstring.
     """
+    if s.seasonal_control.enabled:
+        return _seasonal_fallback(
+            s, now, reason, horizon_h, current, house, away_until, season, indoor_f
+        )
     step = timedelta(minutes=s.planner.step_min)
     n = int((horizon_h or s.planner.horizon_h) * 60 // s.planner.step_min)
     hold = valid_current(s, current) if s.planner.fallback_source == "thermostat" else None
@@ -130,5 +140,46 @@ def fallback_plan(
             PlanStep(
                 t=t, hvac_mode="heat_cool", heat_sp=heat, cool_sp=cool, fan_mode="auto", reason=why
             )
+        )
+    return Plan(kind="fallback", created_at=now, reason_banner=reason, steps=steps)
+
+
+def _seasonal_fallback(
+    s: Settings,
+    now: datetime,
+    reason: str,
+    horizon_h: float | None,
+    current: Current | None,
+    house: HouseState,
+    away_until: datetime | None,
+    season: Season | None,
+    indoor_f: float | None,
+) -> Plan:
+    current_mode = None if current is None else current[0]
+    step = timedelta(minutes=s.planner.step_min)
+    n = int((horizon_h or s.planner.horizon_h) * 60 // s.planner.step_min)
+    away_end = (away_until or next_boundary(s.schedule, now)) if house == HouseState.EMPTY else None
+    steps: list[PlanStep] = []
+    previous: tuple[str, float | None, float | None] | None = None
+    for k in range(n):
+        t = now + k * step
+        block: BlockName = (
+            "away" if away_end is not None and t < away_end else block_at(s.schedule, t)
+        )
+        band = seasonal_band(s, block)
+        mode: HvacMode = seasonal_mode(band, indoor_f, season, current_mode)
+        lo: float | None
+        hi: float | None
+        if mode == "heat":
+            lo, hi = band[0], None
+        elif mode == "cool":
+            lo, hi = None, band[1]
+        else:
+            lo, hi = fallback_setpoints(s, block)
+        choice = (mode, lo, hi)
+        why = f"fallback: {block} {mode}" if choice != previous else ""
+        previous = choice
+        steps.append(
+            PlanStep(t=t, hvac_mode=mode, heat_sp=lo, cool_sp=hi, fan_mode="auto", reason=why)
         )
     return Plan(kind="fallback", created_at=now, reason_banner=reason, steps=steps)

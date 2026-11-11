@@ -5,6 +5,14 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.6 - 2026-11-10 (prerelease)
+
+- Add opt-in weather-aware home and sleep ranges, with indoor-temperature correction and
+  no early schedule preconditioning.
+- Preserve manual overrides, device capability checks, write limits, and the automatic-mode
+  deadband. Review the documented fallback and thermostat limitations before enabling it.
+- Let older configuration exports be imported with weather-aware comfort disabled.
+
 ## 0.6.8-rc.5 - 2026-11-08 (prerelease)
 
 - Send dashboard temperature and mode overrides through the guarded thermostat write path.

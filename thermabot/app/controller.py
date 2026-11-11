@@ -175,6 +175,10 @@ def _supported_setpoints(
     return True
 
 
+def _supported_mode(mode: object, modes: list[str]) -> bool:
+    return isinstance(mode, str) and mode.casefold() in {m.casefold() for m in modes}
+
+
 def _setpoint_detail(data: Mapping[str, float | str | None]) -> str:
     low, high, target = (
         data.get("target_temp_low"),
@@ -580,6 +584,32 @@ class Controller:
                             "reason": "setpoints incompatible with thermostat capabilities",
                         }
                     )
+            if (
+                d.allowed
+                and not manual_override
+                and not act.safety_restore
+                and self.settings.seasonal_control.enabled
+                and snap is not None
+                and d.action.service in ("set_hvac_mode", "set_temperature")
+            ):
+                th = snap.thermostat
+                if not _supported_mode(d.action.data.get("hvac_mode"), th.hvac_modes):
+                    reason = "thermostat does not report support for the requested HVAC mode"
+                elif d.action.service == "set_temperature" and not _supported_setpoints(
+                    d.action, th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit
+                ):
+                    reason = "setpoints incompatible with thermostat capabilities"
+                else:
+                    reason = ""
+                if reason:
+                    d = d.model_copy(
+                        update={
+                            "allowed": False,
+                            "would_write": False,
+                            "guard": "device",
+                            "reason": reason,
+                        }
+                    )
             out.append(d)
             if d.guard == "shadow":
                 self._record(d, "shadow", now)
@@ -674,7 +704,10 @@ class Controller:
                 log.error("write %s failed: %s", act.service, e)
                 return self._fail(d, now, step_t, f"adapter error: {type(e).__name__}")
             self._last_send = now
-            tolerance = OVERRIDE_READBACK_TOL_F if override_id is not None else READBACK_TOL_F
+            strict = override_id is not None or (
+                self.settings.seasonal_control.enabled and not act.safety_restore
+            )
+            tolerance = OVERRIDE_READBACK_TOL_F if strict else READBACK_TOL_F
             ok, ms = await self._readback(act, tolerance)
             if ok:
                 self._record(d, "sent", now, readback=True, ms=ms)
@@ -697,22 +730,34 @@ class Controller:
         if not check_state:
             return
         mirror = await self.ha.get_state(MIRROR_ENTITY)
-        if override_id is not None and any(
+        has_setpoint = any(
             k in action.data for k in ("temperature", "target_temp_low", "target_temp_high")
-        ):
+        )
+        seasonal_plan = (
+            override_id is None
+            and self.settings.seasonal_control.enabled
+            and not action.safety_restore
+            and action.service in ("set_hvac_mode", "set_temperature")
+        )
+        if (override_id is not None and has_setpoint) or seasonal_plan:
             state = await self.ha.get_state(action.entity_id)
             if state is None:
-                raise WriteRefused("thermostat unavailable before override setpoint")
+                raise WriteRefused("thermostat unavailable before mode or setpoint write")
             device = summarise(state)
+            mode = expected_mode or action.data.get("hvac_mode")
             if (
                 device.state.lower() in ("", "unknown", "unavailable")
                 or (expected_mode is not None and device.state.lower() != expected_mode.lower())
-                or not _supported_setpoints(
-                    action,
-                    device.min_temp,
-                    device.max_temp,
-                    device.target_temp_step,
-                    device.temperature_unit,
+                or (seasonal_plan and not _supported_mode(mode, device.hvac_modes))
+                or (
+                    has_setpoint
+                    and not _supported_setpoints(
+                        action,
+                        device.min_temp,
+                        device.max_temp,
+                        device.target_temp_step,
+                        device.temperature_unit,
+                    )
                 )
             ):
                 raise WriteRefused("thermostat mode or setpoint capabilities changed")

@@ -6,13 +6,14 @@ the BRD default (D§14.3 last paragraph).
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from thermabot.core.limits import COOL_SP_MAX, HEAT_SP_MIN, INDOOR_MAX
+from thermabot.core.limits import COOL_SP_MAX, COOL_SP_MIN, HEAT_SP_MIN, INDOOR_MAX
 
 BlockName = Literal["home", "sleep", "away"]
 
@@ -74,6 +75,24 @@ class Bands(BaseModel):
 class SeasonCfg(BaseModel):
     heat_below_f: float = 60
     cool_above_f: float = 68
+
+
+class SeasonalControlCfg(BaseModel):
+    enabled: bool = False
+    home: Range = (68, 71)
+    sleep: Range = (66, 69)
+
+    @field_validator("home", "sleep")
+    @classmethod
+    def _valid_comfort_band(cls, band: Range) -> Range:
+        lo, hi = band
+        if not math.isfinite(lo) or not math.isfinite(hi):
+            raise ValueError("comfort band values must be finite")
+        if lo > hi:
+            raise ValueError("comfort band low must not exceed high")
+        if lo < HEAT_SP_MIN or hi < COOL_SP_MIN or hi > COOL_SP_MAX:
+            raise ValueError("comfort band is outside thermostat safety limits")
+        return band
 
 
 class BlockStart(BaseModel):
@@ -398,6 +417,7 @@ class Settings(BaseModel):
     thermostat: ThermostatCfg = Field(default_factory=ThermostatCfg)
     bands: Bands = Field(default_factory=Bands)
     season: SeasonCfg = Field(default_factory=SeasonCfg)
+    seasonal_control: SeasonalControlCfg = Field(default_factory=SeasonalControlCfg)
     schedule: ScheduleCfg = Field(default_factory=ScheduleCfg)
     rooms: dict[str, RoomCfg] = Field(default_factory=_default_rooms)
     weights: dict[str, dict[str, float]] = Field(default_factory=_default_weights)

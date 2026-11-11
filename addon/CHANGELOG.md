@@ -1,5 +1,11 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.6 - 2026-11-10 (prerelease)
+
+- Add optional weather-aware home and sleep comfort ranges, with indoor-temperature
+  correction and no early preconditioning. Existing configurations remain unchanged.
+- Preserve thermostat write safeguards and support imports of older configuration exports.
+
 ## 0.6.8-rc.5 - 2026-11-08 (prerelease)
 
 - Apply dashboard temperature and mode overrides once through the guarded thermostat path,
