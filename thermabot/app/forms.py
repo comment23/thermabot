@@ -28,6 +28,7 @@ TITLES = {
     "display": "Display",
     "bands": "Comfort bands",
     "season": "Season",
+    "seasonal_control": "Weather-aware comfort",
     "schedule": "Schedule",
     "rooms": "Rooms",
     "weights": "Room weights",
@@ -95,7 +96,7 @@ def _kind(path: str, ann: Any, value: Any) -> tuple[str, list[str]]:
         return "bool", []
     if isinstance(value, int | float):
         last = path.rsplit(".", 1)[-1]
-        if path.startswith("bands.") or path in ABS_TEMP:
+        if path.startswith(("bands.", "seasonal_control.")) or path in ABS_TEMP:
             return "temp", []
         if last.endswith("_f") or last == "tol":
             return "delta", []
@@ -153,7 +154,7 @@ def _scalar_list(ann: Any) -> bool:
 
 def _label(path: str) -> str:
     parts = path.split(".")[1:]
-    if path.startswith("bands.") and parts[-1] in ("0", "1"):
+    if path.startswith(("bands.", "seasonal_control.")) and parts[-1] in ("0", "1"):
         parts[-1] = "low" if parts[-1] == "0" else "high"
     return " ".join(p.replace("_", " ") for p in parts)
 

@@ -62,6 +62,7 @@ class Forecast(BaseModel):
 
 class ThermostatState(BaseModel):
     hvac_mode: str
+    hvac_modes: list[str] = Field(default_factory=list)
     hvac_action: str | None = None
     current_temp: float | None = None
     heat_sp: float | None = None

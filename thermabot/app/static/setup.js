@@ -368,28 +368,46 @@
   // ---- step 5: comfort bands ----
   function renderBands() {
     $('[data-testid=units]').value = units();
+    $('[data-testid=seasonal-notice]').hidden = !st.seasonal_control.enabled;
+    $('[data-testid=bands-defaults]').textContent = st.seasonal_control.enabled
+      ? 'Use legacy defaults' : 'Use defaults';
     $('[data-testid=deadband]').textContent = (units() === 'C'
       ? Math.round(st.writes.deadband_f * 5 / 9 * 10) / 10 : st.writes.deadband_f) + '°' + units();
     const rows = [];
+    if (st.seasonal_control.enabled) {
+      for (const b of ['home', 'sleep']) {
+        const [lo, hi] = st.seasonal_control[b];
+        const inp = (i, v) => `<input type="number" step="${units() === 'C' ? 0.1 : 0.5}" inputmode="decimal"
+          data-seasonal-band="${b}.${i}" data-f="${v}" value="${show(v)}" aria-label="weather-aware ${b} ${i ? 'high' : 'low'}" data-testid="seasonal-band-${b}-${i}">`;
+        rows.push(`<tr><td>weather-aware · ${b}</td><td data-label="Low">${inp(0, lo)}</td><td data-label="High">${inp(1, hi)}</td></tr>`);
+      }
+    }
     for (const s of ['heat', 'cool']) {
       for (const b of ['home', 'sleep', 'away']) {
         const [lo, hi] = st.bands[s][b];
         const inp = (i, v) => `<input type="number" step="${units() === 'C' ? 0.1 : 0.5}" inputmode="decimal"
           data-band="${s}.${b}.${i}" data-f="${v}" value="${show(v)}" aria-label="${s} ${b} ${i ? 'high' : 'low'}" data-testid="band-${s}-${b}-${i}">`;
-        rows.push(`<tr><td>${s} · ${b}</td><td data-label="Low">${inp(0, lo)}</td><td data-label="High">${inp(1, hi)}</td></tr>`);
+        rows.push(`<tr><td>${st.seasonal_control.enabled ? 'legacy ' : ''}${s} · ${b}</td><td data-label="Low">${inp(0, lo)}</td><td data-label="High">${inp(1, hi)}</td></tr>`);
       }
     }
     $('[data-testid=bands]').innerHTML = `<table class="cards"><thead><tr><th>Band</th><th>Low °${units()}</th>
       <th>High °${units()}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   root.addEventListener('input', (e) => {
-    if (e.target.dataset.band) e.target.dataset.edited = '1';
+    if (e.target.dataset.band || e.target.dataset.seasonalBand) e.target.dataset.edited = '1';
     errors('');
   });
 
   function readBands(silent) {
     const inputs = $$('[data-band]');
     if (!inputs.length) return '';
+    const seasonalInputs = $$('[data-seasonal-band]');
+    for (const i of seasonalInputs) {
+      const [b, n] = i.dataset.seasonalBand.split('.');
+      const v = i.dataset.edited ? store(Number(i.value)) : Number(i.dataset.f);
+      if (i.value === '' || !Number.isFinite(v)) continue;
+      st.seasonal_control[b][Number(n)] = v;
+    }
     for (const i of inputs) {
       const [s, b, n] = i.dataset.band.split('.');
       const v = i.dataset.edited ? store(Number(i.value)) : Number(i.dataset.f);
@@ -400,6 +418,17 @@
     const bad = [];
     const db = st.writes.deadband_f;
     for (const i of inputs) i.removeAttribute('aria-invalid');
+    for (const i of seasonalInputs) i.removeAttribute('aria-invalid');
+    for (const b of ['home', 'sleep']) {
+      if (!st.seasonal_control.enabled) break;
+      const [lo, hi] = st.seasonal_control[b];
+      const fields = $$(`[data-seasonal-band^="${b}."]`);
+      if (fields.some((i) => i.value === '' || !Number.isFinite(Number(i.value)))
+          || lo > hi || lo < 60 || hi < 68 || hi > 80) {
+        bad.push(`weather-aware ${b}: enter an ordered range within safety limits`);
+        for (const i of fields) i.setAttribute('aria-invalid', 'true');
+      }
+    }
     const mark = (s, b, n) => $(`[data-band="${s}.${b}.${n}"]`).setAttribute('aria-invalid', 'true');
     for (const b of ['home', 'sleep', 'away']) {
       const [hl, hh] = st.bands.heat[b];
@@ -448,7 +477,9 @@
       + row('People', ppl.length ? ppl.map(([n, p]) => esc(n + ' = ' + (p.life360 || p.companion))).join('<br>')
         : 'none (always occupied)', 'review-people')
       + ['home', 'sleep', 'away'].map((b) => row(b + ' bands',
-        `heat ${band('heat', b)}, cool ${band('cool', b)} °${units()}`)).join('')
+        st.seasonal_control.enabled && b !== 'away'
+          ? `weather-aware ${st.seasonal_control[b].map(show).join('–')} °${units()}`
+          : `heat ${band('heat', b)}, cool ${band('cool', b)} °${units()}`)).join('')
       + '</dl>';
     const changed = st.thermostat.entity_id !== root.dataset.running;
     $('[data-testid=restart-note]').hidden = !changed;
@@ -474,7 +505,17 @@
     else if (a === 'back') go(step - 1);
     else if (a === 'next') { const m = validateStep(); if (m) errors(m); else go(step + 1); }
     else if (a === 'add-room') $('[data-testid=room-list]').insertAdjacentHTML('beforeend', roomRow('', '', true, null));
-    else if (a === 'defaults') { st.bands = JSON.parse(JSON.stringify(DEFAULT_BANDS)); renderBands(); }
+    else if (a === 'defaults') {
+      st.bands = JSON.parse(JSON.stringify(DEFAULT_BANDS));
+      for (const i of $$('[data-band]')) {
+        const [s, b, n] = i.dataset.band.split('.');
+        const value = st.bands[s][b][Number(n)];
+        i.value = show(value);
+        i.dataset.f = value;
+        delete i.dataset.edited;
+        i.removeAttribute('aria-invalid');
+      }
+    }
     else if (a === 'save') save();
   });
 

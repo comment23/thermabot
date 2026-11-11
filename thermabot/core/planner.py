@@ -17,17 +17,20 @@ from thermabot.config import Settings
 from thermabot.core.comfort import (
     base_weights,
     block_band,
+    hold_setpoints,
     house_score,
     remote_rooms,
     room_band,
     room_score,
+    seasonal_band,
+    seasonal_mode,
 )
 from thermabot.core.fallback import fallback_plan
 from thermabot.core.limits import OFF_ABS_CAP_H
 from thermabot.core.schedule import TZ, block_at, season_from_forecast
 from thermabot.core.thermal import DT_H, ThermalParams, room_offset, step
 from thermabot.core.types import Forecast, HouseState, HvacMode, Plan, PlanStep, Season
-from thermabot.core.weather import coverage_h, forecast_at, is_stale
+from thermabot.core.weather import coverage_h, forecast_at, forecast_season, is_stale
 
 Label = Literal["home", "sleep", "away"]
 PRECOND_HOURS = (1, 2, 3, 4)
@@ -81,15 +84,6 @@ def ctrl_step(
         f = min(1.0, (idle - c.cool_sp) / max(idle - full, EPS))
         return idle + f * (full - idle), -f
     return idle, 0.0
-
-
-def hold_setpoints(band: tuple[float, float], deadband: float) -> tuple[float, float]:
-    """heat = band low, cool = band high, widened to the deadband (cool capped at 80)."""
-    lo, hi = band
-    hi = max(hi, lo + deadband)
-    if hi > 80:
-        hi, lo = 80.0, 80.0 - deadband
-    return float(lo), float(hi)
 
 
 def _hour(t: datetime) -> float:
@@ -191,14 +185,27 @@ def run(cx: Ctx, t0: float, i: int, j: int, c: Choice, fan: bool = False) -> Sim
     return sim
 
 
-def candidates(cx: Ctx, label: Label, i: int, j: int, off_left_h: float) -> list[Choice]:
+def candidates(
+    cx: Ctx, label: Label, i: int, j: int, off_left_h: float, t0: float, prev_mode: str
+) -> list[Choice]:
     db = cx.s.writes.deadband_f
     lo, hi = hold_setpoints(cx.bands[label], db)
-    out = [Choice("heat_cool", lo, hi, f"hold {label} {lo:g}-{hi:g}°F")]
-    if cx.season == "heat":
-        out.append(Choice("heat", lo, None, f"coast {label}: heat-only at {lo:g}°F"))
-    elif cx.season == "cool":
-        out.append(Choice("cool", None, hi, f"coast {label}: cool-only at {hi:g}°F"))
+    if cx.s.seasonal_control.enabled:
+        band = seasonal_band(cx.s, label)
+        mode = seasonal_mode(band, t0, cx.season, prev_mode)
+        if mode == "heat":
+            out = [Choice("heat", band[0], None, f"heat {label} at {band[0]:g}°F")]
+        elif mode == "cool":
+            out = [Choice("cool", None, band[1], f"cool {label} at {band[1]:g}°F")]
+        else:
+            lo, hi = hold_setpoints(band, db)
+            out = [Choice("heat_cool", lo, hi, f"hold {label} {lo:g}-{hi:g}°F")]
+    else:
+        out = [Choice("heat_cool", lo, hi, f"hold {label} {lo:g}-{hi:g}°F")]
+        if cx.season == "heat":
+            out.append(Choice("heat", lo, None, f"coast {label}: heat-only at {lo:g}°F"))
+        elif cx.season == "cool":
+            out.append(Choice("cool", None, hi, f"coast {label}: cool-only at {hi:g}°F"))
     oc = cx.s.off
     window = cx.tl.t_out[i:j]
     hours = (j - i) * DT_H
@@ -246,10 +253,14 @@ def choose_block(
     No feasible candidate -> `hold` (D\x154.2)."""
     best: tuple[float, int, Choice, Sim] | None = None
     hold: tuple[Choice, Sim] | None = None
-    for c in candidates(cx, label, i, j, off_left_h):
+    for c in candidates(cx, label, i, j, off_left_h, t0, prev_mode):
         sim = run(cx, t0, i, j, c)
         if hold is None:
             hold = (c, sim)
+        if cx.s.seasonal_control.enabled and c.mode == "off":
+            lo, hi = seasonal_band(cx.s, label)
+            if not all(lo <= temp <= hi for temp in (t0, *sim.temps)):
+                continue
         if not feasible(cx, i, sim, strict=c.mode == "off"):
             continue
         key = (sim.runtime_min + _mode_cost(cx, c, prev_mode), 0 if c.mode == "off" else 1)
@@ -318,9 +329,16 @@ def fan_steps(cx: Ctx, temps: list[float], modes: list[HvacMode]) -> list[bool]:
 
 
 def fallback(inp: PlanInputs, reason: str) -> Plan:
-    cur = None if inp.current_sp is None else (inp.current_mode, *inp.current_sp)
+    cur = (inp.current_mode, *(inp.current_sp or (None, None)))
     return fallback_plan(
-        inp.settings, inp.now, reason, current=cur, house=inp.house, away_until=inp.away_until
+        inp.settings,
+        inp.now,
+        reason,
+        current=cur,
+        house=inp.house,
+        away_until=inp.away_until,
+        season=forecast_season(inp.forecast, inp.now, inp.settings.season, inp.settings.weather),
+        indoor_f=inp.t0,
     )
 
 
@@ -354,7 +372,7 @@ def _optimise(inp: PlanInputs, fc: Forecast) -> Plan:
         temps += sim.temps
         duties += sim.us
         choices += [c] * (j - i)
-        if bn + 1 < len(tl.blocks):
+        if not s.seasonal_control.enabled and bn + 1 < len(tl.blocks):
             nxt = tl.blocks[bn + 1][2]
             if not cx.in_band(j, temps[-1]):
                 pre = precondition(cx, temps, t, i, j, nxt)

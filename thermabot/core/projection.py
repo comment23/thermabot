@@ -20,6 +20,7 @@ from thermabot.core.planner import Choice, ctrl_step
 from thermabot.core.schedule import TZ
 from thermabot.core.thermal import ThermalParams
 from thermabot.core.types import Forecast, ForecastPoint, HvacMode, Plan, PlanStep
+from thermabot.core.weather import forecast_season
 
 HOURS = 48
 STEP_MIN = 15
@@ -95,7 +96,15 @@ def project(
     fitted = params is not None
     if plan is None or not plan.steps or (not fitted and plan.kind != "fallback"):
         why = NOT_FITTED if not fitted else "Fallback plan: no plan yet"
-        plan = fallback_plan(s, now, why, horizon_h=hours + 1, current=current)
+        plan = fallback_plan(
+            s,
+            now,
+            why,
+            horizon_h=hours + 1,
+            current=current,
+            season=forecast_season(fc, now, s.season, s.weather),
+            indoor_f=t0,
+        )
     p = params or ThermalParams()
     h0 = now.replace(minute=0, second=0, microsecond=0)
     per_h = 60 // STEP_MIN

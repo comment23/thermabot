@@ -145,6 +145,13 @@
 {% endif %}
 {% if not p.can('edit_comfort') %}
 <section class="card" data-testid="settings-summary"><h3>Comfort settings (read-only)</h3>
+  {% if settings.seasonal_control.enabled %}
+  <p data-testid="seasonal-bands-summary">Weather-aware comfort:
+    home {{ settings.seasonal_control.home[0]|num }}–{{ settings.seasonal_control.home[1]|num }}°F;
+    sleep {{ settings.seasonal_control.sleep[0]|num }}–{{ settings.seasonal_control.sleep[1]|num }}°F.
+    The away bands below still apply.</p>
+  <p><small>The table's home and sleep bands apply when weather-aware comfort is disabled.</small></p>
+  {% endif %}
   <table><thead><tr><th>Season</th><th>Home</th><th>Sleep</th><th>Away</th></tr></thead><tbody>
   {% for s in ['heat', 'cool'] %}{% set b = settings.bands[s] %}<tr><td>{{ s }}</td>
     <td>{{ b.home[0]|num }}-{{ b.home[1]|num }}</td><td>{{ b.sleep[0]|num }}-{{ b.sleep[1]|num }}</td><td>{{ b.away[0]|num }}-{{ b.away[1]|num }}</td></tr>{% endfor %}

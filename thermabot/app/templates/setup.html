@@ -80,6 +80,9 @@ environment. Saving never changes the run mode or starts/stops the bot.</small><
       <select data-testid="units" name="units"><option value="F">°F</option><option value="C">°C</option></select></label>
     <p><small>Low/high per block and season. Rules: heat high ≤ cool low, and cool high − heat
       low ≥ <span data-testid="deadband"></span>.</small></p>
+    <p data-testid="seasonal-notice" hidden><small>Weather-aware comfort is enabled: its home and
+      sleep ranges are active; the legacy seasonal ranges below still supply away settings.
+      Automatic mode widens a range when necessary to maintain the write deadband.</small></p>
     <div data-testid="bands"></div>
     <button type="button" class="secondary outline" data-setup="defaults" data-testid="bands-defaults">Use defaults</button>
   </section>

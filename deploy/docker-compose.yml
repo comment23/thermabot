@@ -4,12 +4,12 @@
 # Keep .env private and back up ./data.
 services:
   thermabot:
-    image: thermabot:0.6.8-rc.5
+    image: thermabot:0.6.8-rc.6
     build:
       context: ..
       dockerfile: Dockerfile
       args:
-        VERSION: v0.6.8-rc.5
+        VERSION: v0.6.8-rc.6
     container_name: thermabot
     restart: unless-stopped
     stop_grace_period: 20s

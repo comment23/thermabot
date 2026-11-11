@@ -43,6 +43,44 @@ Edit them in the setup wizard (step 6, *Weather*) or under *Settings > Weather*:
 
 A provider or location change takes effect at the next replan (hourly, or right after a save).
 
+## Weather-aware comfort
+
+The optional **Weather-aware comfort** section in Settings sets one home range and one sleep
+range for all seasons. It is disabled by default; existing configurations keep their previous
+seasonal-band and fallback behavior. The setup wizard edits these active ranges when enabled.
+Away continues to use the low edge of the legacy heating-away band and the high edge of the
+legacy cooling-away band.
+
+The mean outdoor forecast for the next 24 hours selects the preferred mode: heating below
+`season.heat_below_f` (60 °F by default), cooling above `season.cool_above_f` (68 °F by
+default), and shoulder in between. This uses actual forecast temperatures, not calendar months.
+If the indoor temperature is outside the active range, the mode needed to bring it back takes
+precedence over that weather preference. In shoulder weather the current heat-only or cool-only
+mode is retained while inside the range; otherwise the closer range edge chooses the mode.
+Home and sleep changes are not preconditioned in advance. The bot checks the current temperature
+on each tick and requests a replan on a range crossing or a schedule/presence transition.
+The optimizer can also choose `off` when its predicted temperatures stay inside the active
+range and the existing off-window guards permit it.
+
+If the forecast is missing or stale, the fallback uses the current single HVAC mode while the
+temperature is in range, or selects the mode needed to correct an out-of-range reading. With
+neither a usable indoor reading nor a single current mode, it may use automatic heat/cool.
+When this policy is enabled, the fallback uses the configured ranges rather than the legacy
+`planner.fallback_source=thermostat` hold. A dashboard override still pauses planned writes;
+safety restores retain their existing priority.
+
+The comfort range is not a guarantee of exact room temperature. The existing write-rate and
+heat/cool reversal limits may delay a mode change, and device increments, reporting delays and
+thermostat hysteresis can cause overshoot. Planned mode changes require Home Assistant to report
+the requested mode as supported. Setpoint writes also require a reported range and increment
+that are compatible with the target.
+Home Assistant applies a mode change before its new setpoint; a device may briefly use that
+mode's previous target. If the setpoint write cannot be confirmed, check the thermostat and
+the write-failure alert.
+Safety restores and automatic fallback retain the configured minimum heat/cool deadband (at
+least 3 °F). For example, a 68–70 °F sleep range becomes 68–71 °F when automatic mode is
+necessary; the 3 °F safeguard is not weakened.
+
 ## Reliability
 
 Each provider has a request timeout, up to 2 retries with backoff (0.5 s, 1 s) on network errors,

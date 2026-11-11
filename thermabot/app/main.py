@@ -41,16 +41,17 @@ from thermabot.config import Env, Settings
 from thermabot.core import openings as opening_policy
 from thermabot.core import planner, shadow, thermal
 from thermabot.core import statemachine as sm
+from thermabot.core.comfort import hold_setpoints, seasonal_band
 from thermabot.core.fallback import fallback_plan
 from thermabot.core.metrics import degree_days
 from thermabot.core.metrics import runtime as day_runtime
 from thermabot.core.presence import TrackerState
 from thermabot.core.presence import resolve as resolve_presence
 from thermabot.core.safety import cumulative_off_h, off_allowed_now
-from thermabot.core.schedule import TZ, season_for, season_from_forecast
+from thermabot.core.schedule import TZ, block_at, season_for, season_from_forecast
 from thermabot.core.summary import LastWeek, render
 from thermabot.core.types import Forecast, HouseState, Plan, Presence, Snapshot, ThermostatState
-from thermabot.core.weather import is_stale
+from thermabot.core.weather import forecast_season, is_stale
 
 log = logging.getLogger(__name__)
 FORECAST_TIMEOUT_S = 15.0  # replan must always produce a plan (fallback) quickly
@@ -107,8 +108,12 @@ def thermostat(st: dict[str, Any], read_at: datetime | None = None) -> Thermosta
         # parse_last_reported() returns None when the dict has no 'state', so pass it.
         seen = parse_last_reported(st)
     single_sp = _num(a.get("temperature"))
+    modes = a.get("hvac_modes")
     return ThermostatState(
         hvac_mode=mode,
+        hvac_modes=[v.lower() for v in modes if isinstance(v, str)]
+        if isinstance(modes, list)
+        else [],
         hvac_action=a.get("hvac_action"),
         current_temp=_num(a.get("current_temperature")),
         heat_sp=single_sp
@@ -173,6 +178,7 @@ class Runtime:
     refit_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_catchup: datetime | None = None
     prev_presence: Presence | None = None  # v0.6.2: carries away_since/since across ticks
+    seasonal_block: str | None = None
 
     async def tick(self, now: datetime) -> None:
         """D§1.3: read the thermostat + mirror, run the controller (guards decide writes)."""
@@ -234,6 +240,40 @@ class Runtime:
         plan = self.ctx.plan
         step = J.current_step(plan, now)
         s = self.controller.settings
+        if s.seasonal_control.enabled:
+            block = (
+                "away"
+                if pres is not None and pres.house == HouseState.EMPTY
+                else block_at(s.schedule, now)
+            )
+            if self.seasonal_block is not None and block != self.seasonal_block:
+                self.loops.trigger_replan()
+                step = None
+            self.seasonal_block = block
+            if step is not None:
+                lo, hi = seasonal_band(s, block)
+                auto_lo, auto_hi = hold_setpoints((lo, hi), s.writes.deadband_f)
+                wrong_setpoint = (
+                    (step.hvac_mode == "heat" and step.heat_sp != lo)
+                    or (step.hvac_mode == "cool" and step.cool_sp != hi)
+                    or (
+                        step.hvac_mode == "heat_cool"
+                        and (step.heat_sp != auto_lo or step.cool_sp != auto_hi)
+                    )
+                )
+                indoor = None if th is None else th.current_temp
+                correction = (
+                    "heat"
+                    if indoor is not None and indoor < lo
+                    else "cool"
+                    if indoor is not None and indoor > hi
+                    else None
+                )
+                if wrong_setpoint or (correction is not None and step.hvac_mode != correction):
+                    self.loops.trigger_replan()
+                    step = None
+        else:
+            self.seasonal_block = None
         extra = J.off_guard_extra(
             plan,
             step,
@@ -458,7 +498,13 @@ class Runtime:
                 else snap.presence.house
             )
             p = fallback_plan(
-                s, now, f"fallback: replan error ({type(e).__name__})", current=cur, house=house
+                s,
+                now,
+                f"fallback: replan error ({type(e).__name__})",
+                current=cur,
+                house=house,
+                season=forecast_season(fc, now, s.season, s.weather),
+                indoor_f=None if snap is None else snap.thermostat.current_temp,
             )
         self.ctx.plan = p
         self.catch_up(now, version)

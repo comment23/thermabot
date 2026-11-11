@@ -4,6 +4,14 @@
 <div class="page-head"><h2>Settings</h2></div>
 {% if p.can('edit_safety') %}<p><a href="setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>{% endif %}
 <section class="card" data-testid="bands-summary">
+  {% if settings.seasonal_control.enabled %}
+  <p data-testid="seasonal-bands-summary">Weather-aware comfort:
+    home {{ settings.seasonal_control.home[0]|num }}–{{ settings.seasonal_control.home[1]|num }}°F;
+    sleep {{ settings.seasonal_control.sleep[0]|num }}–{{ settings.seasonal_control.sleep[1]|num }}°F.
+    Automatic heat/cool mode widens ranges as needed to maintain the write deadband.</p>
+  <p><small>The table below supplies the away bands; its home and sleep bands are used only
+    when weather-aware comfort is disabled.</small></p>
+  {% endif %}
   <table><thead><tr><th>Season</th><th>Home</th><th>Sleep</th><th>Away</th></tr></thead><tbody>
   {% for s in ['heat', 'cool'] %}{% set b = settings.bands[s] %}<tr><td>{{ s }}</td>
     <td>{{ b.home[0]|num }}-{{ b.home[1]|num }}</td><td>{{ b.sleep[0]|num }}-{{ b.sleep[1]|num }}</td><td>{{ b.away[0]|num }}-{{ b.away[1]|num }}</td></tr>{% endfor %}
@@ -19,6 +27,12 @@
   {% for sec in sections %}
   <details class="section" data-section="{{ sec.name }}" data-testid="section-{{ sec.name }}"{% if loop.index <= 3 %} open{% endif %}>
     <summary>{{ sec.title }}{% if sec.locked %} <small>(Owner)</small>{% endif %}</summary>
+    {% if sec.name == 'seasonal_control' %}
+    <p><small>The 24-hour outdoor forecast guides heat-only or cool-only operation, with
+      indoor comfort taking precedence. Home and sleep bands change at their scheduled times,
+      without early preconditioning. A missing reading or safety restore can require automatic
+      mode, which keeps the configured heat/cool deadband.</small></p>
+    {% endif %}
     <fieldset{% if sec.locked %} disabled{% endif %}>
     {% for f in sec.fields %}
       {% if f.kind == 'bool' %}
