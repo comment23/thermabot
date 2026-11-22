@@ -42,6 +42,8 @@ def snap(mode: str = "heat_cool", lo: float = 68, hi: float = 76) -> Snapshot:
             min_temp=45,
             max_temp=95,
             target_temp_step=1,
+            hvac_modes=["off", "heat", "cool", "heat_cool"],
+            temperature_unit="°F",
             fan_mode="auto",
             preset_mode="none",
             last_reported=NOW,
@@ -191,7 +193,7 @@ async def test_ui_override_respects_thermostat_setpoint_step(tmp_path: Path) -> 
         ("target_temp_step", None, "thermostat setpoint step unavailable"),
         ("target_temp_step", 0, "thermostat setpoint step unavailable"),
         ("min_temp", None, "thermostat setpoint range unavailable"),
-        ("temperature_unit", "°C", "thermostat temperature unit is not Fahrenheit"),
+        ("temperature_unit", "K", "thermostat temperature unit is unknown"),
     ],
 )
 async def test_ui_override_blocks_when_capabilities_are_unsafe(
@@ -770,3 +772,125 @@ async def test_mode_already_matching_sends_setpoints_only(tmp_path: Path) -> Non
     cc = [x for x in ha.calls if x["domain"] == "climate"]
     assert [x["service"] for x in cc] == ["set_temperature"]
     assert "hvac_mode" not in cc[0]["data"]
+
+
+@pytest.mark.brd("FR-HA-4")
+async def test_planned_write_checks_mode_when_seasonal_control_is_off(tmp_path: Path) -> None:
+    from thermabot.app.controller import thermostat
+
+    c, ha, _, conn = setup(tmp_path)
+    ha.states[TSTAT]["attributes"]["hvac_modes"] = ["off", "heat", "cool"]
+    snapshot = Snapshot(t=NOW, thermostat=thermostat(ha.states[TSTAT], NOW))
+    decisions = await c.tick(
+        snapshot, PlanStep(t=NOW, hvac_mode="heat_cool", heat_sp=67, cool_sp=75), LIVE, NOW
+    )
+    assert decisions and decisions[0].guard == "device" and not decisions[0].allowed
+    assert ha.calls == []
+    assert outcomes(conn) == ["denied"]
+
+
+@pytest.mark.brd("FR-HA-3")
+async def test_live_device_min_clamps_a_planned_setpoint(tmp_path: Path) -> None:
+    from thermabot.app.controller import thermostat
+
+    c, ha, _, _ = setup(tmp_path)
+    ha.states[TSTAT]["attributes"]["min_temp"] = 66
+    snapshot = Snapshot(t=NOW, thermostat=thermostat(ha.states[TSTAT], NOW))
+    await c.tick(
+        snapshot, PlanStep(t=NOW, hvac_mode="heat_cool", heat_sp=62, cool_sp=76), LIVE, NOW
+    )
+    assert ha.calls[-1]["data"]["target_temp_low"] == 66
+
+
+@pytest.mark.brd("NFR-SAFE-3")
+async def test_celsius_does_not_false_restore_and_writes_convert(tmp_path: Path) -> None:
+    from thermabot.app.controller import thermostat
+
+    c, ha, _, _ = setup(tmp_path)
+    attrs = ha.states[TSTAT]["attributes"]
+    attrs.update(
+        temperature_unit="°C",
+        current_temperature=21,
+        target_temp_low=20,
+        target_temp_high=24,
+        min_temp=7,
+        max_temp=35,
+        target_temp_step=0.5,
+    )
+    th = thermostat(ha.states[TSTAT], NOW)
+    assert th.current_temp == pytest.approx(69.8)
+    decisions = await c.tick(
+        Snapshot(t=NOW, thermostat=th),
+        PlanStep(t=NOW, hvac_mode="heat_cool", heat_sp=67, cool_sp=75),
+        LIVE,
+        NOW,
+    )
+    assert decisions and decisions[0].allowed and not decisions[0].action.safety_restore
+    assert ha.calls[-1]["data"]["target_temp_low"] == pytest.approx(19.5)
+    assert ha.calls[-1]["data"]["target_temp_high"] == pytest.approx(24.0)
+
+
+@pytest.mark.brd("NFR-SAFE-3")
+async def test_celsius_safety_restore_writes_celsius(tmp_path: Path) -> None:
+    from thermabot.app.controller import thermostat
+
+    c, ha, _, _ = setup(tmp_path)
+    ha.states[TSTAT]["state"] = "off"
+    attrs = ha.states[TSTAT]["attributes"]
+    attrs.update(
+        temperature_unit="°C",
+        current_temperature=10,
+        min_temp=7,
+        max_temp=35,
+        target_temp_step=0.5,
+    )
+    th = thermostat(ha.states[TSTAT], NOW)
+    assert th.current_temp == pytest.approx(50)
+    decisions = await c.tick(Snapshot(t=NOW, thermostat=th), STEP, LIVE, NOW)
+    assert decisions[0].allowed and decisions[0].action.safety_restore
+    assert ha.calls[-1]["data"]["target_temp_low"] == pytest.approx(20)
+    assert ha.calls[-1]["data"]["target_temp_high"] == pytest.approx(24.5)
+    assert decisions[0].action.data["target_temp_low"] == pytest.approx(68)
+
+
+@pytest.mark.brd("NFR-SAFE-3")
+async def test_unknown_unit_blocks_writes_and_does_not_restore(tmp_path: Path) -> None:
+    from thermabot.app.controller import thermostat
+
+    c, ha, _, conn = setup(tmp_path)
+    ha.states[TSTAT]["state"] = "off"
+    ha.states[TSTAT]["attributes"]["temperature_unit"] = "K"
+    ha.states[TSTAT]["attributes"]["current_temperature"] = 10
+    th = thermostat(ha.states[TSTAT], NOW)
+    assert th.current_temp is None and th.heat_sp is None
+    decisions = await c.tick(
+        Snapshot(t=NOW, thermostat=th),
+        PlanStep(t=NOW, hvac_mode="heat", heat_sp=68),
+        LIVE,
+        NOW,
+    )
+    assert decisions and decisions[0].guard == "device" and not decisions[0].allowed
+    assert ha.calls == []
+    assert outcomes(conn) == ["denied"]
+
+
+@pytest.mark.brd("FR-KILL-3")
+async def test_kill_restore_uses_heat_when_heat_cool_is_unsupported(tmp_path: Path) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    ha.states[TSTAT]["state"] = "off"
+    ha.states[TSTAT]["attributes"]["hvac_modes"] = ["off", "heat", "cool"]
+    ha.states[TSTAT]["attributes"]["current_temperature"] = 60
+    assert await c.kill_restore(NOW) == "sent"
+    assert [call["service"] for call in ha.calls] == ["set_hvac_mode", "set_temperature"]
+    assert ha.calls[0]["data"]["hvac_mode"] == "heat"
+    assert ha.calls[-1]["data"]["temperature"] == 68
+    assert "target_temp_low" not in ha.calls[-1]["data"]
+
+
+@pytest.mark.brd("FR-KILL-3")
+async def test_kill_restore_fails_closed_without_a_supported_mode(tmp_path: Path) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    ha.states[TSTAT]["state"] = "off"
+    ha.states[TSTAT]["attributes"]["hvac_modes"] = ["off"]
+    assert await c.kill_restore(NOW) == "failed"
+    assert ha.calls == []

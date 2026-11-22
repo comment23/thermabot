@@ -39,7 +39,9 @@ block instead of held -- narrow and unlikely enough that adding new state (e.g. 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import datetime, timedelta
+from typing import Literal
 
 from thermabot.config import BlockName, Settings
 from thermabot.core.comfort import hold_setpoints, seasonal_band, seasonal_mode
@@ -62,6 +64,58 @@ def fallback_setpoints(s: Settings, block: str) -> tuple[float, float]:
     heat_lo = getattr(s.bands.heat, block)[0]
     cool_hi = getattr(s.bands.cool, block)[1]
     return float(heat_lo), float(cool_hi)
+
+
+def choose_hold_mode(
+    modes: Sequence[str] | None,
+    heat_sp: float,
+    cool_sp: float,
+    current_temp: float | None,
+    *,
+    direction: Literal["heat", "cool"] | None = None,
+) -> tuple[HvacMode, float | None, float | None] | None:
+    """A hold the device can run, or None when it lists no usable mode.
+
+    `modes is None` means the caller has no device list and keeps the historical
+    heat_cool pair (pure tests and projections with no thermostat). A real list is
+    never assumed to contain heat_cool: heat_cool or auto is used when listed,
+    otherwise heat or cool from where `current_temp` sits versus the band (at or
+    below the low edge heats, at or above the high edge cools, inside the band the
+    low side heats). `direction` is the safety restore: only that single mode is
+    acceptable when the device cannot do a dual-setpoint hold, so a cold house is
+    not "restored" by cooling.
+    """
+    if modes is None:
+        return "heat_cool", heat_sp, cool_sp
+    listed = {m.casefold() for m in modes}
+    if "heat_cool" in listed:
+        return "heat_cool", heat_sp, cool_sp
+    if "auto" in listed:
+        return "auto", heat_sp, cool_sp
+
+    def _heat_side() -> bool:
+        if direction == "heat":
+            return True
+        if direction == "cool":
+            return False
+        if current_temp is None or current_temp <= heat_sp:
+            return True
+        if current_temp >= cool_sp:
+            return False
+        return current_temp <= (heat_sp + cool_sp) / 2
+
+    order: tuple[Literal["heat", "cool"], ...]
+    if direction is not None:
+        order = (direction,)
+    else:
+        order = ("heat", "cool") if _heat_side() else ("cool", "heat")
+    for name in order:
+        if name not in listed:
+            continue
+        if name == "heat":
+            return "heat", heat_sp, None
+        return "cool", None, cool_sp
+    return None
 
 
 def valid_current(s: Settings, current: Current | None) -> tuple[float, float] | None:
@@ -89,18 +143,31 @@ def fallback_plan(
     away_until: datetime | None = None,
     season: Season | None = None,
     indoor_f: float | None = None,
+    supported_modes: Sequence[str] | None = None,
 ) -> Plan:
-    """One step per planner step over the horizon; fan auto, heat_cool, no `off`. When
-    `house` is EMPTY, steps inside the away window (away_until, else the next schedule
-    boundary) use the away band edges regardless of fallback_source. Elsewhere, holds the
-    current setpoints (fallback_source='thermostat' and valid), else schedule band edges.
+    """One step per planner step over the horizon; fan auto, no `off`. When `house` is
+    EMPTY, steps inside the away window (away_until, else the next schedule boundary) use
+    the away band edges regardless of fallback_source. Elsewhere, holds the current
+    setpoints (fallback_source='thermostat' and valid), else schedule band edges.
     Exception (v0.6.5): while OCCUPIED, a `current` that exactly matches the away band edges
     is treated as stale away-band residue (the bot's own prior write), not a genuine
     household hold -- see module docstring.
+    The HVAC mode is one `supported_modes` actually lists (heat_cool or auto when present,
+    otherwise heat or cool from `indoor_f` versus the band). None keeps heat_cool for
+    callers that have no device list.
     """
     if s.seasonal_control.enabled:
         return _seasonal_fallback(
-            s, now, reason, horizon_h, current, house, away_until, season, indoor_f
+            s,
+            now,
+            reason,
+            horizon_h,
+            current,
+            house,
+            away_until,
+            season,
+            indoor_f,
+            supported_modes,
         )
     step = timedelta(minutes=s.planner.step_min)
     n = int((horizon_h or s.planner.horizon_h) * 60 // s.planner.step_min)
@@ -136,9 +203,24 @@ def fallback_plan(
             else:
                 why = f"fallback: {block} band {heat:g}-{cool:g}°F" if (heat, cool) != prev else ""
         prev = (heat, cool)
+        picked = choose_hold_mode(supported_modes, heat, cool, indoor_f)
+        mode: HvacMode
+        heat_out: float | None
+        cool_out: float | None
+        if picked is None:
+            mode, heat_out, cool_out = "heat", heat, None
+            if k == 0 and not why:
+                why = "fallback: no supported hvac mode for this band"
+        else:
+            mode, heat_out, cool_out = picked
         steps.append(
             PlanStep(
-                t=t, hvac_mode="heat_cool", heat_sp=heat, cool_sp=cool, fan_mode="auto", reason=why
+                t=t,
+                hvac_mode=mode,
+                heat_sp=heat_out,
+                cool_sp=cool_out,
+                fan_mode="auto",
+                reason=why,
             )
         )
     return Plan(kind="fallback", created_at=now, reason_banner=reason, steps=steps)
@@ -154,6 +236,7 @@ def _seasonal_fallback(
     away_until: datetime | None,
     season: Season | None,
     indoor_f: float | None,
+    supported_modes: Sequence[str] | None = None,
 ) -> Plan:
     current_mode = None if current is None else current[0]
     step = timedelta(minutes=s.planner.step_min)
@@ -176,6 +259,25 @@ def _seasonal_fallback(
             lo, hi = None, band[1]
         else:
             lo, hi = fallback_setpoints(s, block)
+        if supported_modes is not None:
+            listed = {m.casefold() for m in supported_modes}
+            if mode == "heat_cool" and "heat_cool" not in listed and "auto" in listed:
+                mode = "auto"
+            elif mode.casefold() not in listed:
+                # The seasonal choice is not on this device. Hold with a listed mode
+                # instead of assuming heat_cool.
+                direction: Literal["heat", "cool"] | None = (
+                    mode if mode in ("heat", "cool") else None
+                )
+                remapped = choose_hold_mode(
+                    supported_modes,
+                    band[0] if lo is None else lo,
+                    band[1] if hi is None else hi,
+                    indoor_f,
+                    direction=direction,
+                )
+                if remapped is not None:
+                    mode, lo, hi = remapped
         choice = (mode, lo, hi)
         why = f"fallback: {block} {mode}" if choice != previous else ""
         previous = choice

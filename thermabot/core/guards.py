@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Literal
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +22,7 @@ from thermabot.core.limits import (  # re-exported: guards is the documented hom
     OFF_FORCED_ON_H,
     PRECOND_MAX_BEYOND_BAND,
 )
+from thermabot.core.schedule import active_zone
 from thermabot.core.types import Action, Decision, Snapshot
 
 __all__ = [
@@ -40,7 +40,6 @@ __all__ = [
 
 READABLE_MAX_AGE_MIN = 10
 ALLOWED_SERVICES = ("set_hvac_mode", "set_temperature", "set_fan_mode", "set_preset_mode")
-TZ = ZoneInfo("America/New_York")
 
 
 class WriteRecord(BaseModel):
@@ -261,8 +260,8 @@ def rate_limit(action: Action, ctx: GuardCtx) -> Verdict:
     wc = ctx.settings.writes
     if _no_change(action, ctx):
         return False, "no change vs read-back state"
-    today = ctx.now.astimezone(TZ).date()
-    todays = [w for w in ctx.recent_writes if w.t.astimezone(TZ).date() == today]
+    today = ctx.now.astimezone(active_zone()).date()
+    todays = [w for w in ctx.recent_writes if w.t.astimezone(active_zone()).date() == today]
     if len(todays) >= wc.max_per_day:
         return False, f"{wc.max_per_day} writes today"
     if _is_sp_write(action):

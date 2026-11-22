@@ -27,7 +27,7 @@ from thermabot.core.comfort import (
 )
 from thermabot.core.fallback import fallback_plan
 from thermabot.core.limits import OFF_ABS_CAP_H
-from thermabot.core.schedule import TZ, block_at, season_from_forecast
+from thermabot.core.schedule import active_zone, block_at, season_from_forecast
 from thermabot.core.thermal import DT_H, ThermalParams, room_offset, step
 from thermabot.core.types import Forecast, HouseState, HvacMode, Plan, PlanStep, Season
 from thermabot.core.weather import coverage_h, forecast_at, forecast_season, is_stale
@@ -53,6 +53,9 @@ class PlanInputs(BaseModel):
     off_used_h: float = 0  # cumulative off hours in the current run
     # thermostat's current (heat_sp, cool_sp); the fallback may hold them (fallback_source)
     current_sp: tuple[float | None, float | None] | None = None
+    # None = the caller has no device list (legacy heat_cool hold). A list, including
+    # an empty one, is what the thermostat reported and is not assumed to include heat_cool.
+    hvac_modes: list[str] | None = None
 
 
 @dataclass
@@ -75,11 +78,11 @@ def ctrl_step(
 ) -> tuple[float, float]:
     """One 15-min step under thermostat control. Returns (T_next, signed duty)."""
     idle = step(t, t_out, hour, "idle", p)
-    if c.mode in ("heat", "heat_cool") and c.heat_sp is not None and idle < c.heat_sp:
+    if c.mode in ("heat", "heat_cool", "auto") and c.heat_sp is not None and idle < c.heat_sp:
         full = step(t, t_out, hour, "heat", p)
         f = min(1.0, (c.heat_sp - idle) / max(full - idle, EPS))
         return idle + f * (full - idle), f
-    if c.mode in ("cool", "heat_cool") and c.cool_sp is not None and idle > c.cool_sp:
+    if c.mode in ("cool", "heat_cool", "auto") and c.cool_sp is not None and idle > c.cool_sp:
         full = step(t, t_out, hour, "cool", p)
         f = min(1.0, (idle - c.cool_sp) / max(idle - full, EPS))
         return idle + f * (full - idle), -f
@@ -87,7 +90,7 @@ def ctrl_step(
 
 
 def _hour(t: datetime) -> float:
-    lt = t.astimezone(TZ)
+    lt = t.astimezone(active_zone())
     return lt.hour + lt.minute / 60
 
 
@@ -228,12 +231,12 @@ def cost(cx: Ctx, sim: Sim, c: Choice, prev_mode: str) -> float:
 
 
 def off_reason(cx: Ctx, i: int, j: int, sim: Sim) -> str:
-    t1 = cx.tl.times[i].astimezone(TZ).strftime("%H:%M")
+    t1 = cx.tl.times[i].astimezone(active_zone()).strftime("%H:%M")
     t2 = cx.tl.times[j - 1] + timedelta(minutes=cx.s.planner.step_min)
     w = cx.tl.t_out[i:j]
     ms = min(cx.score(i + n, t)[0] for n, t in enumerate(sim.temps))
     return (
-        f"off {t1}–{t2.astimezone(TZ):%H:%M}: forecast {min(w):.0f}–{max(w):.0f}°F, "
+        f"off {t1}–{t2.astimezone(active_zone()):%H:%M}: forecast {min(w):.0f}–{max(w):.0f}°F, "
         f"house coasts in band (min score {ms:.0f})"
     )
 
@@ -318,7 +321,7 @@ def fan_steps(cx: Ctx, temps: list[float], modes: list[HvacMode]) -> list[bool]:
                     and (gain >= fc.min_proven_gain_f)
                 ):
                     on = True
-        lt = cx.tl.times[k].astimezone(TZ)
+        lt = cx.tl.times[k].astimezone(active_zone())
         hk = (lt.year, lt.month, lt.day, lt.hour)
         if on and used.get(hk, 0) < per_h:
             used[hk] = used.get(hk, 0) + 1
@@ -339,6 +342,7 @@ def fallback(inp: PlanInputs, reason: str) -> Plan:
         away_until=inp.away_until,
         season=forecast_season(inp.forecast, inp.now, inp.settings.season, inp.settings.weather),
         indoor_f=inp.t0,
+        supported_modes=inp.hvac_modes,
     )
 
 

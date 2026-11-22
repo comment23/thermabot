@@ -20,13 +20,14 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 from thermabot.adapters.influx import Influx, line
+from thermabot.app.units import c_to_f_exact, temperature_scale
 from thermabot.config import PlannerCfg, Settings
 from thermabot.core import openings as opening_policy
 from thermabot.core import planner
 from thermabot.core.comfort import room_age_min
 from thermabot.core.metrics import MinuteSample, normalise_cs
 from thermabot.core.safety import OffWindow
-from thermabot.core.schedule import TZ, block_at
+from thermabot.core.schedule import active_zone, block_at
 from thermabot.core.shadow import MinuteRow, Setpoints
 from thermabot.core.thermal import Sample, ThermalParams, U, confidence, holdout_mae
 from thermabot.core.types import Forecast, Plan, PlanStep
@@ -118,7 +119,7 @@ def build_samples(
         if t0 is not None and t1 is not None and to is not None:
             u = action_u(value_at(action, t, max_age))
             c = normalise_cs(num(value_at(cs, t, max_age)))
-            lt = t.astimezone(TZ)
+            lt = t.astimezone(active_zone())
             sample = Sample(
                 t=t0,
                 t_next=t1,
@@ -325,8 +326,8 @@ def local_day_bounds(d: date) -> tuple[datetime, datetime]:
     """[00:00, next 00:00) local, as aware datetimes (23/25 h on DST days)."""
     nxt = d + timedelta(days=1)
     return (
-        datetime(d.year, d.month, d.day, tzinfo=TZ),
-        datetime(nxt.year, nxt.month, nxt.day, tzinfo=TZ),
+        datetime(d.year, d.month, d.day, tzinfo=active_zone()),
+        datetime(nxt.year, nxt.month, nxt.day, tzinfo=active_zone()),
     )
 
 
@@ -388,6 +389,28 @@ def _state_num(st: dict[str, Any] | None) -> float | None:
     return None if st is None else num(st.get("state"))
 
 
+def _temp_f(st: dict[str, Any] | None) -> float | None:
+    """A temperature sensor state in °F. °C is converted. An unknown unit is dropped
+    (not stored as if it were °F) and logged."""
+    value = _state_num(st)
+    if st is None or value is None:
+        return None
+    attrs = st.get("attributes") or {}
+    raw_unit = attrs.get("unit_of_measurement") or attrs.get("temperature_unit")
+    unit = raw_unit if isinstance(raw_unit, str) else None
+    scale = temperature_scale(unit)
+    if scale == "F":
+        return value
+    if scale == "C":
+        return c_to_f_exact(value)
+    log.warning(
+        "ignoring temperature %s: unit %r is unknown",
+        st.get("entity_id") or "",
+        unit,
+    )
+    return None
+
+
 def sample_doc(
     now: datetime,
     s: Settings,
@@ -415,7 +438,7 @@ def sample_doc(
             rooms[key] = {"temp": None, "age_min": None}
             continue
         age = room_age_min(now, _stamp(st, "last_reported"), _stamp(st, "last_updated"))
-        rooms[key] = {"temp": _state_num(st), "age_min": None if age is None else round(age, 1)}
+        rooms[key] = {"temp": _temp_f(st), "age_min": None if age is None else round(age, 1)}
     opening_states = {eid: states.get(eid) for eid in s.openings.sensors}
     return {
         "tstat": None
@@ -432,7 +455,7 @@ def sample_doc(
         "blower": None if blower is None else num(blower.get("state")),
         "cs_raw": cs_raw,
         "cs": normalise_cs(cs_raw),
-        "t_out": _state_num(states.get(sn.outdoor)) if sn.outdoor else None,
+        "t_out": _temp_f(states.get(sn.outdoor)) if sn.outdoor else None,
         "t_out_fc": None if forecast is None else forecast_at(forecast, now),
         "rooms": rooms,
         "opening_assessment": [
@@ -671,14 +694,14 @@ def shadow_report(conn: sqlite3.Connection, now: datetime, days: int = 30) -> di
             "steps": steps,
             "need": MIN_TRAIN_STEPS,
         }
-    since = (now.astimezone(TZ) - timedelta(days=days)).date().isoformat()
+    since = (now.astimezone(active_zone()) - timedelta(days=days)).date().isoformat()
     rows = [
         dict(x)
         for x in conn.execute(
             "SELECT * FROM shadow_daily WHERE day >= ? ORDER BY day DESC", (since,)
         )
     ]
-    week = (now.astimezone(TZ) - timedelta(days=7)).date().isoformat()
+    week = (now.astimezone(active_zone()) - timedelta(days=7)).date().isoformat()
     last7 = [
         ShadowDay.model_validate({k: x[k] for k in SHADOW_COLS if x[k] is not None})
         for x in rows

@@ -9,10 +9,29 @@ def test_single_mode_uses_temperature_for_active_setpoint(mode: str, field: str)
     th = thermostat(
         {
             "state": mode,
-            "attributes": {"temperature": 70, "target_temp_low": 68, "target_temp_high": 76},
+            "attributes": {
+                "temperature": 70,
+                "target_temp_low": 68,
+                "target_temp_high": 76,
+                "temperature_unit": "°F",
+            },
         }
     )
     assert getattr(th, field) == 70
+
+
+@pytest.mark.brd("NFR-SAFE-3")
+def test_unknown_temperature_unit_clears_readings() -> None:
+    from thermabot.app.main import thermostat
+
+    th = thermostat(
+        {
+            "state": "heat",
+            "attributes": {"temperature": 10, "current_temperature": 10, "temperature_unit": "K"},
+        }
+    )
+    assert th.current_temp is None and th.heat_sp is None
+    assert th.temperature_unit == "K"
 
 
 @pytest.mark.brd("NFR-SAFE-6")

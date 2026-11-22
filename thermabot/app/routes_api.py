@@ -34,7 +34,7 @@ from thermabot.core.overrides import (
     override_command_key,
     override_expiry,
 )
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.types import (
     Forecast,
     GuestIn,
@@ -57,6 +57,9 @@ from thermabot.core.types import (
 )
 
 TICK_STALE = timedelta(minutes=3)
+# Before the first tick, /healthz is "starting" rather than stale. Covers the
+# startup replan (bounded at 45s) plus one tick.
+START_GRACE = timedelta(seconds=90)
 KILL_BUDGET_S = 5.0
 MIRROR_TIMEOUT_S = 0.9
 log = logging.getLogger(__name__)
@@ -87,6 +90,7 @@ class Ctx:
     plan: Plan | None = None
     score: float | None = None
     last_tick: datetime | None = None
+    started_at: datetime | None = None
     ha_health: str = "connecting"
     weather_health: str = "ok"
     heartbeat_configured: bool = False
@@ -171,20 +175,33 @@ router = APIRouter()
 
 
 # ---- read routes ---------------------------------------------------------------------
+def _starting(c: Ctx, now: datetime) -> bool:
+    return (
+        c.last_tick is None
+        and c.started_at is not None
+        and timedelta(0) <= now - c.started_at <= START_GRACE
+    )
+
+
 @router.get("/healthz", response_model=HealthzOut)
 async def healthz(c: CtxD) -> JSONResponse:
-    """Public (no secrets in body). 503 when the tick is > 3 min old."""
+    """Public (no secrets in body). 503 when the tick is > 3 min old.
+
+    During the startup grace, before any tick, the state is `starting` and the
+    status is 200 so a probe does not treat a booting process as stale.
+    """
     now = c.clock()
     fresh = c.last_tick is not None and now - c.last_tick <= TICK_STALE
+    starting = _starting(c, now)
     out = HealthzOut(
-        ok=fresh,
-        state=c.eff().state,
+        ok=fresh or starting,
+        state="starting" if starting else c.eff().state,
         ha=c.ha_health,
         weather=c.weather_health,
         last_tick=c.last_tick,
         version=__version__,
     )
-    return JSONResponse(out.model_dump(mode="json"), status_code=200 if fresh else 503)
+    return JSONResponse(out.model_dump(mode="json"), status_code=200 if fresh or starting else 503)
 
 
 @router.get("/api/status", response_model=StatusOut)
@@ -274,7 +291,7 @@ async def history(
         return H.series(c.conn, c.clock(), rng, load_settings(c).display.units)
     if not 1 <= days <= 400:
         raise HTTPException(422, "days must be 1..400")
-    since = (c.clock().astimezone(TZ).date() - timedelta(days=days)).isoformat()
+    since = (c.clock().astimezone(active_zone()).date() - timedelta(days=days)).isoformat()
     rows = c.conn.execute(
         "SELECT * FROM daily_metrics WHERE day >= ? ORDER BY day", (since,)
     ).fetchall()
@@ -307,12 +324,29 @@ class LoginIn(BaseModel):
     trusted: bool = False
 
 
+def cookie_secure(request: Request) -> bool:
+    """Secure when the request URL is https.
+
+    This matches the first-run cookie. Uvicorn rewrites the scheme from
+    X-Forwarded-Proto only when started with proxy headers, which this app is
+    not. The header is not read here.
+    """
+    return request.url.scheme == "https"
+
+
 def _login_response(
-    tok: str, csrf: str, trusted: bool = False, status_code: int = 200
+    request: Request, tok: str, csrf: str, trusted: bool = False, status_code: int = 200
 ) -> JSONResponse:
     r = JSONResponse({"ok": True, "csrf": csrf}, status_code=status_code)
     age = int((A.SESSION_LONG if trusted else A.SESSION_SHORT).total_seconds())
-    r.set_cookie(COOKIE, tok, httponly=True, samesite="strict", max_age=age)
+    r.set_cookie(
+        COOKIE,
+        tok,
+        httponly=True,
+        secure=cookie_secure(request),
+        samesite="strict",
+        max_age=age,
+    )
     r.headers["Cache-Control"] = "no-store"
     return r
 
@@ -324,7 +358,7 @@ async def login(body: LoginIn, request: Request, c: CtxD) -> JSONResponse:
         tok, csrf = c.auth.login(body.username, body.password, ip=ip, trusted=body.trusted)
     except LoginError as e:
         raise HTTPException(e.status, str(e)) from e
-    return _login_response(tok, csrf, body.trusted)
+    return _login_response(request, tok, csrf, body.trusted)
 
 
 class FirstAccountIn(BaseModel):
@@ -367,7 +401,7 @@ async def first_account(request: Request, c: CtxD) -> JSONResponse:
         tok, csrf = c.auth.create_first_owner(body.username, body.password, ip)
     except LoginError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
-    response = _login_response(tok, csrf, status_code=201)
+    response = _login_response(request, tok, csrf, status_code=201)
     response.delete_cookie(A.FIRST_RUN_COOKIE, path=request.scope.get("root_path") or "/")
     return response
 
@@ -433,15 +467,15 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
         restore=restore,
         mirror_ok=mirror_ok,
     )
-    e = c.eff()
-    c.broker.publish("state", {"state": e.state, "label": e.label})
+    eff = c.eff()
+    c.broker.publish("state", {"state": eff.state, "label": eff.label})
     return KillOut(
-        state=e.state,
+        state=eff.state,
         kill_switch=new.kill_switch,
         run_mode=new.run_mode,
         restore=restore,
         mirror_ok=mirror_ok,
-    )  # type: ignore[arg-type]
+    )
 
 
 # ---- override / nudge / guest ---------------------------------------------------------

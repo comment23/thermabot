@@ -34,12 +34,17 @@ def snap_at(i: int) -> Snapshot:
         t=t,
         thermostat=ThermostatState(
             hvac_mode="off",
+            hvac_modes=["off", "heat", "cool", "heat_cool"],
             current_temp=temp_at(i),
             heat_sp=68,
             cool_sp=76,
             fan_mode="auto",
             preset_mode="none",
             last_reported=t,
+            min_temp=45,
+            max_temp=95,
+            target_temp_step=1,
+            temperature_unit="°F",
         ),
     )
 

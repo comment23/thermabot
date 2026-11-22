@@ -21,6 +21,7 @@ from thermabot.adapters import db
 from thermabot.app.auth import Principal, require
 from thermabot.app.routes_api import Ctx, CtxD, load_settings, settings_put
 from thermabot.config import Settings
+from thermabot.core.schedule import active_zone
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -182,7 +183,7 @@ async def recovery_status(c: CtxD, _: Owner) -> dict[str, Any]:
             )
             if p.is_file() and not p.is_symlink() and BACKUP_NAME.fullmatch(p.name)
         ][:30],
-        "automatic_backup": "Nightly at 03:30 America/New_York; seven daily copies retained",
+        "automatic_backup": (f"Nightly at 03:30 {active_zone().key}; seven daily copies retained"),
     }
 
 

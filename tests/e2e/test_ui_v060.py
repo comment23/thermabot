@@ -20,7 +20,7 @@ from tests.e2e.test_setup_wizard import ABS, DESKTOP, PHONE, _ctx_page, _shot
 from thermabot.app import efficiency as EF
 from thermabot.app import history as H
 from thermabot.app import jobs as J
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.shadow import ShadowDay
 from thermabot.core.types import (
     Forecast,
@@ -102,7 +102,7 @@ def seed(srv: Srv, days: int = 2, now: datetime | None = None) -> datetime:
             for h in range(60)
         ],
     )
-    today = now.astimezone(TZ).date()
+    today = now.astimezone(active_zone()).date()
     for i in range(14):
         conn.execute(
             "INSERT INTO daily_metrics (day, heat_min, cool_min, fan_only_min, hdd, cdd,"

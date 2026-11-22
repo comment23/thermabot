@@ -77,6 +77,37 @@ def test_healthz_ok_then_503_when_stale(tmp_path: Path) -> None:
     assert r.status_code == 503 and r.json()["ok"] is False
 
 
+@pytest.mark.brd("NFR-REL-3")
+def test_healthz_starting_before_the_first_tick(tmp_path: Path) -> None:
+    ctx, clk, c = make(tmp_path)
+    ctx.last_tick = None
+    ctx.started_at = None
+    stale = c.get("/healthz")
+    assert stale.status_code == 503 and stale.json()["ok"] is False
+    ctx.started_at = clk.t
+    starting = c.get("/healthz")
+    assert starting.status_code == 200
+    assert starting.json()["state"] == "starting" and starting.json()["ok"] is True
+    clk.t += timedelta(seconds=91)
+    expired = c.get("/healthz")
+    assert expired.status_code == 503 and expired.json()["state"] != "starting"
+
+
+@pytest.mark.brd("NFR-SEC-1")
+def test_session_cookie_secure_follows_https_not_forwarded_proto(tmp_path: Path) -> None:
+    ctx, _, http = make(tmp_path)
+    https = TestClient(create_app(ctx), base_url="https://testserver")
+    body = {"username": "jordan", "password": PW}
+    plain = http.post("/login", json=body)
+    secure = https.post("/login", json=body)
+    forwarded = http.post("/login", json=body, headers={"X-Forwarded-Proto": "https"})
+    assert plain.status_code == 200 and "secure" not in plain.headers["set-cookie"].lower()
+    assert "secure" in secure.headers["set-cookie"].lower()
+    assert "httponly" in plain.headers["set-cookie"].lower()
+    assert "samesite=strict" in plain.headers["set-cookie"].lower()
+    assert "secure" not in forwarded.headers["set-cookie"].lower()
+
+
 @pytest.mark.brd("FR-MODE-1")
 def test_status_shape_and_bob(tmp_path: Path) -> None:
     ctx, _, c = make(tmp_path)

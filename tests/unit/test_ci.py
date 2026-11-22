@@ -28,6 +28,8 @@ def test_ci_workflow_has_all_jobs() -> None:
         "gitleaks",
     }
     assert "refs/tags/v" in jobs["image"]["if"]
+    lint_commands = [step.get("run") for step in jobs["lint"]["steps"]]
+    assert "mypy --strict thermabot" in lint_commands
     steps = " ".join(str(s) for s in jobs["unit"]["steps"])
     assert "--cov-fail-under=90" in steps and "--junitxml" in steps
     sec = " ".join(str(s) for s in jobs["security"]["steps"])

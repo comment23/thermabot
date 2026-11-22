@@ -32,7 +32,7 @@ from thermabot.app import efficiency as E
 from thermabot.app import jobs as J
 from thermabot.app import routes_api
 from thermabot.app.auth import Auth
-from thermabot.app.controller import Controller, parse_last_reported
+from thermabot.app.controller import Controller, parse_last_reported, thermostat
 from thermabot.app.jobs import Background
 from thermabot.app.loops import HEARTBEAT_ENTITY, TICK_S, Jobs, Loops, slot_store
 from thermabot.app.routes_api import Ctx, _kv_put, load_settings
@@ -48,7 +48,13 @@ from thermabot.core.metrics import runtime as day_runtime
 from thermabot.core.presence import TrackerState
 from thermabot.core.presence import resolve as resolve_presence
 from thermabot.core.safety import cumulative_off_h, off_allowed_now
-from thermabot.core.schedule import TZ, block_at, season_for, season_from_forecast
+from thermabot.core.schedule import (
+    active_zone,
+    block_at,
+    configure_timezone,
+    season_for,
+    season_from_forecast,
+)
 from thermabot.core.summary import LastWeek, render
 from thermabot.core.types import Forecast, HouseState, Plan, Presence, Snapshot, ThermostatState
 from thermabot.core.weather import forecast_season, is_stale
@@ -86,56 +92,8 @@ def _secret(s: Any) -> str | None:
     return None if s is None else str(s.get_secret_value())
 
 
-def _num(v: Any) -> float | None:
-    try:
-        return None if v is None else float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def thermostat(st: dict[str, Any], read_at: datetime | None = None) -> ThermostatState:
-    """`read_at` = when we fetched `st` from HA. The Trane/Nexia entity only bumps
-    last_reported on change (homeassistant.update_entity does not bump it either,
-    probed 2026-10-05), so a steady house looks "stale" by HA's stamp. A successful
-    read of an available entity IS fresh: on integration failure HA marks it
-    unavailable, which DEGRADES via tstat_unavailable. So freshness = read time.
-    Without read_at (or when unavailable) fall back to HA's own stamp."""
-    a = st.get("attributes", {})
-    mode = str(st.get("state"))
-    if read_at is not None and mode not in ("unavailable", "unknown", "", "None"):
-        seen: datetime | None = read_at
-    else:
-        # parse_last_reported() returns None when the dict has no 'state', so pass it.
-        seen = parse_last_reported(st)
-    single_sp = _num(a.get("temperature"))
-    modes = a.get("hvac_modes")
-    return ThermostatState(
-        hvac_mode=mode,
-        hvac_modes=[v.lower() for v in modes if isinstance(v, str)]
-        if isinstance(modes, list)
-        else [],
-        hvac_action=a.get("hvac_action"),
-        current_temp=_num(a.get("current_temperature")),
-        heat_sp=single_sp
-        if mode.lower() == "heat" and single_sp is not None
-        else _num(a.get("target_temp_low")),
-        cool_sp=single_sp
-        if mode.lower() == "cool" and single_sp is not None
-        else _num(a.get("target_temp_high")),
-        min_temp=_num(a.get("min_temp")),
-        max_temp=_num(a.get("max_temp")),
-        target_temp_step=_num(a.get("target_temp_step")),
-        temperature_unit=str(a.get("temperature_unit") or a.get("unit_of_measurement") or "")
-        or None,
-        fan_mode=a.get("fan_mode"),
-        preset_mode=a.get("preset_mode"),
-        humidity=_num(a.get("current_humidity")),
-        last_reported=seen,
-    )
-
-
 def last_week(conn: sqlite3.Connection, now: datetime) -> LastWeek:
-    since = (now.astimezone(TZ).date() - timedelta(days=7)).isoformat()
+    since = (now.astimezone(active_zone()).date() - timedelta(days=7)).isoformat()
     r = conn.execute(
         "SELECT COALESCE(SUM(heat_min),0) h, COALESCE(SUM(cool_min),0) c,"
         " COALESCE(SUM(cool_effort),0) ce, COALESCE(SUM(fan_only_min),0) f,"
@@ -257,7 +215,7 @@ class Runtime:
                     (step.hvac_mode == "heat" and step.heat_sp != lo)
                     or (step.hvac_mode == "cool" and step.cool_sp != hi)
                     or (
-                        step.hvac_mode == "heat_cool"
+                        step.hvac_mode in ("heat_cool", "auto")
                         and (step.heat_sp != auto_lo or step.cool_sp != auto_hi)
                     )
                 )
@@ -482,6 +440,7 @@ class Runtime:
                     off_allowed=off_allowed_now(windows, self.controller.hold_until, now),
                     off_used_h=cumulative_off_h(windows, now),
                     current_sp=(th.heat_sp, th.cool_sp),
+                    hvac_modes=list(th.hvac_modes),
                 )
             )
         except Exception as e:  # noqa: BLE001 - never leave the controller without a plan
@@ -505,6 +464,7 @@ class Runtime:
                 house=house,
                 season=forecast_season(fc, now, s.season, s.weather),
                 indoor_f=None if snap is None else snap.thermostat.current_temp,
+                supported_modes=[] if snap is None else list(snap.thermostat.hvac_modes),
             )
         self.ctx.plan = p
         self.catch_up(now, version)
@@ -623,7 +583,7 @@ class Runtime:
         come from the local `samples` table; runtime falls back to Influx minute data when
         there are no local samples. Missing data stays NULL (never fake zeros)."""
         s = load_settings(self.ctx)
-        day = (now.astimezone(TZ) - timedelta(days=1)).date()
+        day = (now.astimezone(active_zone()) - timedelta(days=1)).date()
         start, end = J.local_day_bounds(day)
         rt: dict[str, float | None] = dict.fromkeys(
             ("heat_min", "cool_min", "fan_only_min", "heat_effort", "cool_effort", "hdd", "cdd")
@@ -740,6 +700,21 @@ class Runtime:
         return await self.notifier.deliver(
             envelope("alert", "test", "info", "open", "thermabot alert", text, self.clock())
         )
+
+    async def apply_timezone(self) -> None:
+        """Env.TZ when set, else Home Assistant's time_zone, else UTC. One zone for
+        schedules, guards and the UI. An unknown name is skipped."""
+        ha_zone: str | None = None
+        if not self.env.TZ.strip():
+            try:
+                cfg = await asyncio.wait_for(self.ha.get_config(), 5)
+            except Exception:  # noqa: BLE001 - HA down: UTC until a later process start
+                log.warning("time zone: Home Assistant config unavailable; using UTC")
+                cfg = None
+            raw = None if cfg is None else cfg.get("time_zone")
+            ha_zone = str(raw).strip() if raw else None
+        zone = configure_timezone(self.env.TZ, ha_zone)
+        log.info("schedule time zone is %s", zone.key)
 
     async def aclose(self) -> None:
         for t in list(self.pending):
@@ -933,6 +908,8 @@ def create_app(env: Env | None = None, **kw: Any) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         persist_effective_settings(rt.ctx)  # v0.1.11 first-start row (FR-CFG-1)
+        rt.ctx.started_at = rt.clock()
+        await rt.apply_timezone()
         rt.spawn("efficiency-backfill", rt._safe("efficiency backfill", rt.efficiency_backfill()))
         rt.loops._stop = False
         task = asyncio.create_task(rt.loops.run(), name="thermabot-loops")

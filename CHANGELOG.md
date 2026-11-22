@@ -5,6 +5,20 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## Unreleased
+
+- Convert Home Assistant °C temperatures to °F inside the app and convert setpoints back
+  to the device unit on the single write path. An unknown unit clears the reading, is
+  logged, and blocks every climate write, including safety and kill-switch restore.
+- Check HVAC mode, setpoint range, step and unit on every planned write and on restore,
+  and pass the thermostat's live min/max into the guard. Do not assume `heat_cool` when
+  the device does not list it (or `auto`).
+- Use one schedule timezone: `TZ`, otherwise Home Assistant's `time_zone`, otherwise UTC.
+- Mark the session cookie `Secure` on HTTPS. `X-Forwarded-Proto` is not trusted.
+- Report `/healthz` as `starting` (HTTP 200) until the first tick, within a 90s grace.
+- Type-check the whole `thermabot` package with `mypy --strict`, including the write path.
+- List `aarch64` on the add-on, and publish the tagged container image for amd64 and arm64.
+
 ## 0.6.8-rc.6 - 2026-11-10 (prerelease)
 
 - Add opt-in weather-aware home and sleep ranges, with indoor-temperature correction and

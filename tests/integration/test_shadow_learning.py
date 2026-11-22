@@ -17,7 +17,7 @@ from tests.integration.test_jobs import NOW, Clock, rt_of
 from thermabot.adapters import db
 from thermabot.app import jobs as J
 from thermabot.app.main import Runtime
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.statemachine import Persisted
 from thermabot.core.thermal import ThermalParams, step
 from thermabot.core.types import ThermostatState
@@ -71,7 +71,7 @@ def fill(conn: Any, start: datetime, minutes: int, bot: dict[str, Any] | None = 
         if m % 15 == 0:
             if m:
                 temp = step(temp, to, hour, "heat" if heating else "idle", TRUE)
-            lt = t.astimezone(TZ)
+            lt = t.astimezone(active_zone())
             hour = lt.hour + lt.minute / 60
             to = 45 + 8 * ((hour - 9) / 12 if 3 <= hour <= 21 else 0)
             heating = temp < 68 or (heating and temp < 70)
@@ -99,6 +99,7 @@ def test_sample_doc_fields_and_nulls() -> None:
         "sensor.study_temperature": {
             "state": "72.5",
             "last_reported": (now - timedelta(minutes=10)).isoformat(),
+            "attributes": {"unit_of_measurement": "°F"},
         },
     }
     d = J.sample_doc(now, HOUSE, th, states, None, None, None, "OCCUPIED")
@@ -234,9 +235,9 @@ async def test_no_model_catch_up_refit_after_replan_rate_limited(tmp_path: Path)
 # ---- rollup: comfort + shadow_daily -----------------------------------------------------
 @pytest.mark.brd("FR-MET-1")
 async def test_rollup_fills_comfort_and_shadow_daily(tmp_path: Path) -> None:
-    now = datetime(2026, 10, 5, 0, 5, tzinfo=TZ)
+    now = datetime(2026, 10, 5, 0, 5, tzinfo=active_zone())
     rt = rt_of(tmp_path, Clock(now))
-    start = datetime(2026, 10, 4, tzinfo=TZ)
+    start = datetime(2026, 10, 4, tzinfo=active_zone())
     bot = {"mode": "heat_cool", "heat_sp": 66, "cool_sp": 76, "fan": "auto", "kind": "optimised"}
     fill(rt.conn, start, 24 * 60, bot)
     fill_old = datetime(2026, 1, 1, tzinfo=UTC)
@@ -261,9 +262,9 @@ async def test_rollup_fills_comfort_and_shadow_daily(tmp_path: Path) -> None:
 
 @pytest.mark.brd("FR-MET-1")
 async def test_rollup_without_model_stores_null_bot(tmp_path: Path) -> None:
-    now = datetime(2026, 10, 5, 0, 5, tzinfo=TZ)
+    now = datetime(2026, 10, 5, 0, 5, tzinfo=active_zone())
     rt = rt_of(tmp_path, Clock(now))
-    fill(rt.conn, datetime(2026, 10, 4, 12, tzinfo=TZ), 60)
+    fill(rt.conn, datetime(2026, 10, 4, 12, tzinfo=active_zone()), 60)
     await rt.rollup(now)
     sd = dict(rt.conn.execute("SELECT * FROM shadow_daily").fetchone())
     assert sd["bot_heat_min"] is None and sd["saved_pct"] is None and sd["model_version"] is None

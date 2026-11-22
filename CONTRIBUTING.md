@@ -35,7 +35,7 @@ playwright install chromium                       # for the e2e tests
 ```bash
 ruff format --check .
 ruff check .
-mypy --strict thermabot/core
+mypy --strict thermabot
 python -m pytest tests/unit tests/integration -q
 python -m pytest tests/e2e -q
 ```

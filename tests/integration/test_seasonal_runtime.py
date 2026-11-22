@@ -74,7 +74,7 @@ async def test_tick_replans_before_a_stale_mode_can_worsen_comfort(
         ("hvac_modes", ["off", "heat_cool", "cool"]),
         ("target_temp_step", 2),
         ("min_temp", None),
-        ("temperature_unit", "°C"),
+        ("temperature_unit", "K"),
     ],
 )
 @pytest.mark.brd("FR-HA-4")

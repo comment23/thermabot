@@ -3,7 +3,7 @@
 - tick every 60 s; heartbeat published EVERY tick in EVERY state (DISABLED, kill OFF, even
   when the tick job raises) so the HA watchdog only fires when the process is dead.
 - replan hourly at :05 local, or immediately after `trigger_replan()`.
-- nightly refit 03:15, metrics rollup 00:05, backup 03:30 (local, America/New_York).
+- nightly refit 03:15, metrics rollup 00:05, backup 03:30 (local, `active_zone`).
 - weekly summary Sunday 18:00 local (DST-safe via core.summary.next_fire); missed while down ->
   sent on start-up only when < 6 h late; never twice for the same slot.
 Jobs fire when the clock crosses their local wall time (prev < target <= now), so a restart
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 
 from thermabot.adapters import db
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.summary import next_fire, send_late
 
 log = logging.getLogger(__name__)
@@ -57,10 +57,10 @@ def crossed(prev: datetime | None, now: datetime, at: time) -> bool:
     """True when local wall time `at` lies in (prev, now]. DST-safe (local construction)."""
     if prev is None:
         return False
-    lp, ln = prev.astimezone(TZ), now.astimezone(TZ)
+    lp, ln = prev.astimezone(active_zone()), now.astimezone(active_zone())
     d = lp.date()
     while d <= ln.date():
-        target = datetime(d.year, d.month, d.day, at.hour, at.minute, tzinfo=TZ)
+        target = datetime(d.year, d.month, d.day, at.hour, at.minute, tzinfo=active_zone())
         if lp < target <= ln:
             return True
         d += timedelta(days=1)
@@ -129,7 +129,9 @@ class Loops:
         try:
             if self._replan_due or (
                 self._prev is not None
-                and crossed(self._prev, now, time(now.astimezone(TZ).hour, REPLAN_MINUTE))
+                and crossed(
+                    self._prev, now, time(now.astimezone(active_zone()).hour, REPLAN_MINUTE)
+                )
             ):
                 self._replan_due = not await self._run("replan", self.jobs.replan, now)
             await self._run("tick", self.jobs.tick, now)

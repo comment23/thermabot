@@ -20,6 +20,7 @@ def initial_states() -> dict[str, dict[str, Any]]:
                 "min_temp": 45,
                 "max_temp": 95,
                 "target_temp_step": 1,
+                "temperature_unit": "°F",
                 "current_temperature": 71,
                 "current_humidity": 48,
                 "temperature": None,
@@ -41,10 +42,22 @@ def initial_states() -> dict[str, dict[str, Any]]:
             "state": "58",
             "attributes": {"unit_of_measurement": "°F"},
         },
-        "sensor.study_temperature": {"state": "70.5", "attributes": {}},
-        "sensor.bedroom_1_temperature": {"state": "69.0", "attributes": {}},
-        "sensor.bedroom_2_temperature": {"state": "70.0", "attributes": {}},
-        "sensor.den_temperature": {"state": "66.0", "attributes": {}},
+        "sensor.study_temperature": {
+            "state": "70.5",
+            "attributes": {"unit_of_measurement": "°F"},
+        },
+        "sensor.bedroom_1_temperature": {
+            "state": "69.0",
+            "attributes": {"unit_of_measurement": "°F"},
+        },
+        "sensor.bedroom_2_temperature": {
+            "state": "70.0",
+            "attributes": {"unit_of_measurement": "°F"},
+        },
+        "sensor.den_temperature": {
+            "state": "66.0",
+            "attributes": {"unit_of_measurement": "°F"},
+        },
         "input_boolean.thermabot_enabled": {"state": "off", "attributes": {}},
         "input_boolean.thermabot_watchdog": {"state": "on", "attributes": {}},
         "input_datetime.thermabot_watchdog_last": {

@@ -40,6 +40,7 @@ _MAP = {
     "ha_url": "HA_URL",
     "ha_token": "HA_TOKEN",
     "log_level": "LOG_LEVEL",
+    "timezone": "TZ",
 }
 
 

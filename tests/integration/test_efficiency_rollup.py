@@ -19,7 +19,7 @@ from tests.integration.test_jobs import Clock, rt_of
 from thermabot.adapters import db
 from thermabot.app import efficiency as EF
 from thermabot.app import jobs as J
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.shadow import MinuteRow, ShadowDay
 
 NOW = datetime(2026, 1, 20, 12, 0, tzinfo=UTC)
@@ -94,7 +94,9 @@ async def test_backfill_idempotent_bounded_never_touches_samples(tmp_path: Path)
     for i, t in enumerate(temps):
         fill_day(conn, FIRST + timedelta(days=i), t)
     fill_day(conn, FIRST + timedelta(days=6), 40, keep=0.5)  # low coverage: no point
-    fill_day(conn, NOW.astimezone(TZ).date(), 40, keep=0.3)  # today: not complete, skipped
+    fill_day(
+        conn, NOW.astimezone(active_zone()).date(), 40, keep=0.3
+    )  # today: not complete, skipped
     before = conn.execute("SELECT COUNT(*), SUM(LENGTH(snapshot_json)) FROM samples").fetchone()
     sleeps: list[float] = []
 
@@ -103,7 +105,7 @@ async def test_backfill_idempotent_bounded_never_touches_samples(tmp_path: Path)
         await asyncio.sleep(0)
 
     res = await EF.backfill(conn, NOW, sleep=sleep)
-    span = (NOW.astimezone(TZ).date() - FIRST).days  # Jan 10 .. Jan 19
+    span = (NOW.astimezone(active_zone()).date() - FIRST).days  # Jan 10 .. Jan 19
     assert res["candidates"] == span and res["written"] == 7
     assert res["qualifying_heat"] == 6 and res["qualifying_cool"] == 0
     assert len(sleeps) == span  # a yield after every one-day chunk
@@ -208,7 +210,7 @@ def test_app_start_runs_backfill_no_climate_calls(tmp_path: Path) -> None:
     data = tmp_path / "data"
     seed_house(data)
     conn = db.open_db(data / "thermabot.db", now=NOW)
-    yday = datetime.now(UTC).astimezone(TZ).date() - timedelta(days=1)
+    yday = datetime.now(UTC).astimezone(active_zone()).date() - timedelta(days=1)
     fill_day(conn, yday, 40, keep=0.2)
     conn.close()
     ha = MockHA()

@@ -8,7 +8,7 @@
 
 ## Checklist
 
-- [ ] `ruff format --check .`, `ruff check .`, `mypy --strict thermabot/core` pass
+- [ ] `ruff format --check .`, `ruff check .`, `mypy --strict thermabot` pass
 - [ ] `pytest tests/unit tests/integration` and `pytest tests/e2e` pass
 - [ ] New tests carry `@pytest.mark.brd(...)`
 - [ ] Only `app/controller.py` calls `_call_service`; no new write path bypasses the guards

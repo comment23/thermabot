@@ -1,5 +1,12 @@
 # thermabot add-on changelog
 
+## Unreleased
+
+- Request amd64 and aarch64. The Dockerfile takes Supervisor's `BUILD_ARCH` and does not
+  install amd64-only packages. The tagged plain image is published for amd64 and arm64;
+  this repo does not itself push the add-on image (Supervisor builds it per architecture).
+- Leave `TZ` unset unless the timezone option is set, so the app follows Home Assistant.
+
 ## 0.6.8-rc.6 - 2026-11-10 (prerelease)
 
 - Add optional weather-aware home and sleep comfort ranges, with indoor-temperature
@@ -58,7 +65,7 @@
   advanced HA URL/token override for pointing at a different Home Assistant instance.
 - Thermostat entity, rooms, bands, schedule and presence are still configured in the
   in-app setup wizard / Settings page (unchanged; already ingress-friendly since v0.3.0).
-- amd64 only; other architectures are not currently supported.
+- amd64 only at that release; aarch64 is requested from the unreleased add-on manifest.
 - CI validates `addon/config.yaml` and `repository.yaml` on every push/PR
   (`.github/workflows/ci.yml`: `addon-config` job). The security job also builds and scans
   the add-on image; Supervisor builds the image from source on install.

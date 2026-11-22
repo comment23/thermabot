@@ -13,6 +13,16 @@ def tz() -> ZoneInfo:
     return TZ
 
 
+@pytest.fixture(autouse=True)
+def _reset_schedule_zone():
+    """Keep the configured zone at America/New_York around every test."""
+    from thermabot.core.schedule import configure_timezone
+
+    configure_timezone("America/New_York")
+    yield
+    configure_timezone("America/New_York")
+
+
 def local(y: int, mo: int, d: int, h: int = 0, mi: int = 0) -> datetime:
     """Aware datetime in America/New_York."""
     return datetime(y, mo, d, h, mi, tzinfo=TZ)

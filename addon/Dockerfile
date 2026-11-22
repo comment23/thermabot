@@ -10,12 +10,14 @@ ARG REVISION=unknown
 
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    DATA_DIR=/data PORT=8095 TZ=America/New_York
+    DATA_DIR=/data PORT=8095
 
+# Supervisor passes BUILD_ARCH (amd64, aarch64, ...). Default keeps a local amd64 build working.
+ARG BUILD_ARCH=amd64
 LABEL \
     io.hass.version="${VERSION}" \
     io.hass.type="addon" \
-    io.hass.arch="amd64" \
+    io.hass.arch="${BUILD_ARCH}" \
     org.opencontainers.image.title="thermabot" \
     org.opencontainers.image.source="https://github.com/comment23/thermabot" \
     org.opencontainers.image.version="${VERSION}" \
