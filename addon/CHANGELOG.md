@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Request amd64 and aarch64. The Dockerfile takes Supervisor's `BUILD_ARCH` and does not
-  install amd64-only packages. The tagged plain image is published for amd64 and arm64;
-  this repo does not itself push the add-on image (Supervisor builds it per architecture).
+  install amd64-only packages. This repo does not push the add-on image; Supervisor builds
+  it per architecture. The tagged plain image stays amd64 because CI cannot run QEMU.
 - Leave `TZ` unset unless the timezone option is set, so the app follows Home Assistant.
 
 ## 0.6.8-rc.6 - 2026-11-10 (prerelease)

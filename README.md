@@ -81,11 +81,11 @@ token is not required for the same Home Assistant instance.
    behavior.
 
 The add-on manifest lists **amd64** and **aarch64**. Its Dockerfile does not install
-architecture-specific binaries; Supervisor builds one image per architecture. The tagged
-container image (`ghcr.io/comment23/thermabot-dev`) is published for `linux/amd64` and
-`linux/arm64`. This repository's security job still scans the add-on Dockerfile on the
-amd64 runner; an aarch64 image is not cross-built in that job. The public source snapshot
-is a prerelease, not a
+architecture-specific binaries; Supervisor builds one image per architecture when the
+add-on is installed. The tagged container image (`ghcr.io/comment23/thermabot-dev`) stays
+**amd64**. This repository's Actions allowlist does not permit `docker/setup-qemu-action`,
+so the release workflow cannot cross-build `linux/arm64`. The security job also scans the
+add-on Dockerfile on the amd64 runner only. The public source snapshot is a prerelease, not a
 stable production release. The in-app version is the application version (`0.6.8`); the
 Home Assistant add-on catalog marks this build as `0.6.8-rc.6`. See
 [first-run setup](docs/setup.md) for the wizard and operating details.

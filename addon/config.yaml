@@ -7,8 +7,9 @@ description: >-
   https://github.com/comment23/thermabot for the full README and config reference.
 url: https://github.com/comment23/thermabot
 # amd64 and aarch64. The add-on Dockerfile is architecture-neutral (no amd64-only
-# binaries). Supervisor builds one image per entry. The plain ghcr.io image published
-# on a version tag is linux/amd64 + linux/arm64; see README.
+# binaries). Supervisor builds one image per entry. The tagged ghcr.io/comment23/thermabot-dev
+# image stays amd64: this repo's Actions allowlist does not include docker/setup-qemu-action,
+# so CI cannot cross-build arm64. See README.
 arch:
   - amd64
   - aarch64
