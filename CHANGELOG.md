@@ -17,6 +17,8 @@ private development repository.
 - Mark the session cookie `Secure` on HTTPS. `X-Forwarded-Proto` is not trusted.
 - Report `/healthz` as `starting` (HTTP 200) until the first tick, within a 90s grace.
 - Type-check the whole `thermabot` package with `mypy --strict`, including the write path.
+- Bump `opentelemetry-api` to 1.45.2 (CVE-2026-126360). FastAPI pulls it in; the
+  previous pin failed `pip-audit` on main as well.
 - List `aarch64` on the add-on. The tagged container image stays amd64: the Actions
   allowlist does not include `docker/setup-qemu-action`, so CI cannot cross-build arm64.
   Supervisor still builds the add-on for each architecture in `addon/config.yaml`.

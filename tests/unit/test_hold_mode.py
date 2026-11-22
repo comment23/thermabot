@@ -114,12 +114,16 @@ def test_room_and_outdoor_samples_convert_or_drop() -> None:
     assert _temp_f({"state": "20", "entity_id": "sensor.room", "attributes": {}}) is None
 
 
+def _zone_name(configured: str | None, ha_time_zone: str | None = None) -> str:
+    return configure_timezone(configured, ha_time_zone).key
+
+
 @pytest.mark.brd("FR-CMF-2")
 def test_timezone_falls_back_from_env_to_ha_to_utc() -> None:
-    assert configure_timezone("Europe/Paris").key == "Europe/Paris"
-    assert active_zone().key == "Europe/Paris"
-    assert configure_timezone("", "America/Chicago").key == "America/Chicago"
-    assert configure_timezone("Not/AZone", "America/Denver").key == "America/Denver"
-    assert configure_timezone("", None).key == "UTC"
-    assert configure_timezone("nope", "also-nope").key == "UTC"
+    assert _zone_name("Europe/Paris") == "Europe/Paris"
+    assert active_zone() is configure_timezone("Europe/Paris")
+    assert _zone_name("", "America/Chicago") == "America/Chicago"
+    assert _zone_name("Not/AZone", "America/Denver") == "America/Denver"
+    assert _zone_name("", None) == "UTC"
+    assert _zone_name("nope", "also-nope") == "UTC"
     configure_timezone("America/New_York")
