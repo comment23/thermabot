@@ -15,3 +15,7 @@ paths = [
   '''(^|/)\.(mypy|ruff|pytest)_cache/''',
   '''(^|/)__pycache__/''',
 ]
+# Timezone name in tests/unit/test_hold_mode.py. The generic-api-key rule
+# treats `.key == "America/Chicago"` as a credential. The line is gone, but
+# gitleaks still scans the commit that added it.
+regexes = ['''^America/Chicago$''']
