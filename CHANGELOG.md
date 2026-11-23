@@ -5,6 +5,16 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.8 - 2026-11-23 (prerelease)
+
+The Home Assistant add-on catalog version is `0.6.8-rc.8`. The in-app version remains
+`0.6.8`. Stable v0.6.8 is still blocked on the seven-day SHADOW soak and owner review.
+
+- The add-on no longer exits at startup when `ha_url` and `ha_token` are blank. s6-overlay
+  does not pass `SUPERVISOR_TOKEN` into a `#!/usr/bin/env sh` command; the entrypoint now
+  uses `with-contenv` and also reads the s6 environment directory. The image tag is
+  `0.6.8-rc.8`.
+
 ## 0.6.8-rc.7 - 2026-11-23 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.7`. The in-app version remains

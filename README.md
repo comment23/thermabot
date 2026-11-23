@@ -82,7 +82,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on supports **amd64** and **aarch64**. Home Assistant pulls a prebuilt image
 (`ghcr.io/comment23/thermabot-addon-amd64` or `ghcr.io/comment23/thermabot-addon-aarch64`,
-tag `0.6.8-rc.7`) and does not compile the add-on on the device. CI publishes those images
+tag `0.6.8-rc.8`) and does not compile the add-on on the device. CI publishes those images
 from the default branch. A git tag is not required to install. Wait until that publish
 succeeds, and until the packages are public, before installing or updating. Bump the
 add-on `version` to ship a later image; Home Assistant will not re-pull an existing tag.
@@ -91,7 +91,7 @@ only for `v*` tags. Compose does not use it.
 
 The public source snapshot is a prerelease, not a stable production release. The in-app
 version is the application version (`0.6.8`); the Home Assistant add-on catalog marks
-this build as `0.6.8-rc.7`. See [first-run setup](docs/setup.md) for the wizard and
+this build as `0.6.8-rc.8`. See [first-run setup](docs/setup.md) for the wizard and
 operating details.
 
 ### Docker Compose (fallback)

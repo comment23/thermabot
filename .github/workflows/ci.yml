@@ -124,6 +124,8 @@ jobs:
           exit-code: "1"
       # Repo-root context, same recipe addon-publish pushes. Supervisor does not build this file.
       - run: docker build --file addon/Dockerfile --build-arg BUILD_ARCH=amd64 --tag thermabot-addon:scan .
+      - name: add-on starts from the Supervisor token
+        run: bash scripts/check_addon_startup.sh thermabot-addon:scan
       - name: scan Home Assistant add-on image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -250,6 +252,8 @@ jobs:
             --build-arg "BUILD_ARCH=${{ matrix.arch }}" \
             --tag "${{ steps.addon.outputs.image }}" \
             .
+      - name: add-on starts from the Supervisor token
+        run: bash scripts/check_addon_startup.sh "${{ steps.addon.outputs.image }}"
       - name: scan add-on image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

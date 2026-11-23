@@ -1,5 +1,13 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.8 - 2026-11-23 (prerelease)
+
+- Start the add-on with s6 `with-contenv`, and read `/run/s6/container_environment`
+  when the process environment does not include `SUPERVISOR_TOKEN`. Blank `ha_url` and
+  `ha_token` options again use the Supervisor token (`http://supervisor/core`). Previously
+  the s6 CMD started with `#!/usr/bin/env sh`, hid that token, and exited with
+  `missing or invalid environment: HA_TOKEN`.
+
 ## 0.6.8-rc.7 - 2026-11-23 (prerelease)
 
 - Supervisor pulls a prebuilt image instead of building this add-on on the device.

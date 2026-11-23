@@ -22,7 +22,7 @@ from scripts.check_addon_config import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-REF = "ghcr.io/comment23/thermabot-addon-amd64:0.6.8-rc.7"
+REF = "ghcr.io/comment23/thermabot-addon-amd64:0.6.8-rc.8"
 
 
 class _Response:
@@ -47,18 +47,18 @@ def _http_error(url: str, status: int, body: bytes) -> urllib.error.HTTPError:
 @pytest.mark.brd("ADDON-1")
 def test_live_manifest_points_supervisor_at_public_images() -> None:
     assert main([]) == 0
-    assert supervisor_refs(IMAGE_TEMPLATE, ["amd64", "aarch64"], "0.6.8-rc.7") == [
-        "ghcr.io/comment23/thermabot-addon-amd64:0.6.8-rc.7",
-        "ghcr.io/comment23/thermabot-addon-aarch64:0.6.8-rc.7",
+    assert supervisor_refs(IMAGE_TEMPLATE, ["amd64", "aarch64"], "0.6.8-rc.8") == [
+        "ghcr.io/comment23/thermabot-addon-amd64:0.6.8-rc.8",
+        "ghcr.io/comment23/thermabot-addon-aarch64:0.6.8-rc.8",
     ]
 
 
 @pytest.mark.brd("ADDON-1")
 def test_image_template_rejects_a_local_build_or_a_baked_tag() -> None:
     with pytest.raises(AddonConfigError, match="image must be"):
-        supervisor_refs("ghcr.io/comment23/other-{arch}", ["amd64"], "0.6.8-rc.7")
+        supervisor_refs("ghcr.io/comment23/other-{arch}", ["amd64"], "0.6.8-rc.8")
     with pytest.raises(AddonConfigError, match="image must be"):
-        supervisor_refs(f"{IMAGE_TEMPLATE}:0.6.8-rc.7", ["amd64"], "0.6.8-rc.7")
+        supervisor_refs(f"{IMAGE_TEMPLATE}:0.6.8-rc.8", ["amd64"], "0.6.8-rc.8")
 
 
 @pytest.mark.brd("ADDON-1")
