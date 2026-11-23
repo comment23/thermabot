@@ -37,10 +37,17 @@ class Recorder(httpx.AsyncBaseTransport):
 def _run(tmp: Path, ha: MockHA, t: Recorder, wait_beats: int = 1) -> dict[str, object]:
     app = create_app(load_env(env(tmp)), ha_transport=t)
     with TestClient(app) as c:
-        deadline = time.monotonic() + 5
-        while len(ha.webhook_posts) < wait_beats and time.monotonic() < deadline:
-            time.sleep(0.02)
-        body: dict[str, object] = c.get("/healthz").json()
+        # /healthz stays "starting" until the first tick. A heartbeat can land
+        # before that tick, so waiting on the webhook alone races on a slow runner.
+        deadline = time.monotonic() + 20
+        body: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            response = c.get("/healthz")
+            assert response.status_code == 200, response.text
+            body = response.json()
+            if len(ha.webhook_posts) >= wait_beats and body.get("state") != "starting":
+                break
+            time.sleep(0.05)
     return body
 
 
