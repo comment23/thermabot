@@ -280,8 +280,7 @@ def test_api_efficiency_with_data_and_pages(tmp_path: Path) -> None:
     assert page.text.count('data-testid="eff-point"') == 9
     assert 'data-testid="eff-empty-cool"' in page.text
     assert 'href="/' not in page.text and 'src="/' not in page.text
-    dash = c.get("/")
-    assert "Efficiency: index 100 (heat)" in dash.text
+    assert "Efficiency: index 100 (heat)" in page.text
     assert ctx.conn.execute("SELECT COUNT(*) FROM writes").fetchone()[0] == w0
     assert ha.calls == []
     st = db.read_bot_state(ctx.conn)
@@ -296,5 +295,4 @@ def test_efficiency_page_empty_and_ingress(tmp_path: Path) -> None:
     r = c.get("/efficiency", headers={"X-Ingress-Path": "/api/hassio_ingress/abc"})
     assert r.status_code == 200
     assert 'data-testid="eff-empty-heat"' in r.text and 'data-testid="savings-empty"' in r.text
-    dash = c.get("/")
-    assert "Efficiency: collecting data 0/5" in dash.text
+    assert "Efficiency: collecting data 0/5" in r.text

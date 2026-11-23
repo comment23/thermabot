@@ -104,29 +104,28 @@ def test_tap_targets_at_least_44px(phone: Page, srv: Srv) -> None:
 
 @pytest.mark.brd("FR-UI-1")
 @pytest.mark.parametrize(
-    ("user", "want", "hidden"),
+    ("user", "tabs", "hidden"),
     [
-        ("alex", ["/settings", "/setup", "/model", "/health", "/users", "/account"], []),
-        ("jordan", ["/account"], ["/settings", "/setup", "/users"]),
+        ("alex", ["/", "/plan", "/insights", "/settings"], []),
+        ("jordan", ["/", "/insights"], ["/plan", "/settings", "/users"]),
     ],
 )
-def test_more_menu_role_gated(
-    phone: Page, srv: Srv, user: str, want: list[str], hidden: list[str]
+def test_tabs_are_role_gated(
+    phone: Page, srv: Srv, user: str, tabs: list[str], hidden: list[str]
 ) -> None:
     login(phone, srv, user)
-    more = phone.locator("[data-testid=nav-more]")
-    links = more.locator("ul a")
-    assert not links.first.is_visible(), "More menu should start closed"
-    more.locator("summary").click()
-    # v0.3.0: nav links are relative (ingress); compare as site paths
-    hrefs = ["/" + (a.get_attribute("href") or "") for a in links.all() if a.is_visible()]
-    for h in want:
-        assert h in hrefs, f"{user}: {h} missing from More ({hrefs})"
+    hrefs = [
+        "/" + (a.get_attribute("href") or "").lstrip("./")
+        for a in phone.locator("[data-testid=nav] a").all()
+    ]
+    hrefs = [h if h != "/" else "/" for h in hrefs]
+    for h in tabs:
+        assert h in hrefs, f"{user}: {h} missing ({hrefs})"
     for h in hidden:
-        assert h not in hrefs, f"{user}: {h} should be hidden"
+        assert h not in hrefs, f"{user}: {h} should be hidden ({hrefs})"
+    menu = phone.locator("[data-testid=account-menu]")
+    menu.locator("summary").click()
     assert phone.locator("[data-testid=logout]").is_visible()
-    box = more.locator("ul").bounding_box()
-    assert box is not None and box["x"] >= 0 and box["x"] + box["width"] <= W and box["y"] >= 0
-    phone.click(f"[data-testid=nav-more] a[href='{want[-1].lstrip('/')}']")
-    phone.wait_for_url(f"**{want[-1]}")
+    phone.click("[data-testid=account-menu] a[href='account']")
+    phone.wait_for_url("**/account")
     assert_page_healthy(phone, srv)

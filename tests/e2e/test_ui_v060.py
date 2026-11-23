@@ -140,6 +140,7 @@ def test_dashboard_history_chart_ranges(browser: Browser, srv: Srv) -> None:
     srv.ctx.clock = lambda: seeded_at
     pg = _ctx_page(browser, srv, DESKTOP)
     login(pg, srv, "jordan")  # any role
+    pg.goto(f"{srv.url}/history")
     _chart_ready(pg, "24h")
     ch = pg.locator("[data-testid=history-chart]")
     assert int(ch.get_attribute("data-points") or 0) <= 500
@@ -200,6 +201,7 @@ def test_history_chart_uses_house_timezone(browser: Browser, srv: Srv, now: date
         expect(pg.locator("[data-testid=home-timezone]")).to_have_text(
             "Home time: America/New_York"
         )
+        pg.goto(f"{srv.url}/history")
         _chart_ready(pg, "24h")
         pg.wait_for_function("window.chartLabels.length > 0")
         pg.locator("[data-testid=history-fallback] summary").click()
@@ -278,6 +280,7 @@ def test_history_chart_touch_tooltip_and_resize(browser: Browser, srv: Srv) -> N
     seed(srv, days=1)
     pg = _ctx_page(browser, srv, PHONE)
     login(pg, srv, "alex")
+    pg.goto(f"{srv.url}/history")
     _chart_ready(pg, "24h")
     ch = pg.locator("[data-testid=history-chart]")
     over = ch.locator(".u-over")
@@ -298,6 +301,7 @@ def test_history_chart_touch_tooltip_and_resize(browser: Browser, srv: Srv) -> N
 @pytest.mark.brd("FR-UI-1")
 def test_history_chart_empty_and_error_states(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
+    page.goto(f"{srv.url}/history")
     ch = page.locator("[data-testid=history-chart]")
     expect(ch).to_have_attribute("data-state", "empty")
     expect(ch.locator(".chart-state")).to_contain_text("No samples")
@@ -347,7 +351,7 @@ def test_status_pills(page: Page, srv: Srv) -> None:
     srv.ctx.weather_health = "stale"
     login(page, srv, "alex")
     expect(page.locator("[data-testid=weather-pill]")).to_have_text("Weather stale")
-    expect(page.locator("[data-testid=state-badge]")).to_have_text("SHADOW")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Shadow")
     srv.ctx.settings = Settings()
     page.reload()
     expect(page.locator("[data-testid=state-badge]")).to_have_attribute(
@@ -355,7 +359,7 @@ def test_status_pills(page: Page, srv: Srv) -> None:
     )
     page.click("[data-testid=kill-open]")
     page.click("[data-testid=kill-off]")
-    expect(page.locator("[data-testid=kill-state]")).to_have_attribute("data-on", "off")
+    expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-mode", "stopped")
     assert_page_healthy(page, srv)
 
 
@@ -455,6 +459,7 @@ def test_dashboard_under_ingress_prefix(page: Page, srv: Srv) -> None:
     expect(page.locator("[data-testid=toast]")).to_contain_text("Welcome")
     page.goto(f"{srv.url}{prefix}/")  # Playwright does not route a followed redirect hop
     assert page.locator("header .brand img").evaluate("img => img.complete && img.naturalWidth > 0")
+    page.goto(f"{srv.url}{prefix}/history")
     _chart_ready(page, "24h")
     page.goto(f"{srv.url}{prefix}/forecast")
     expect(page.locator("[data-testid=forecast-chart] canvas")).to_have_count(1)
@@ -491,8 +496,6 @@ def test_screenshots_every_page(browser: Browser, srv: Srv, vp: str, dark: bool)
             continue  # dark: dashboard only (plus the forecast/efficiency/setup dark shots)
         r = pg.goto(f"{srv.url}{href}" + ("?room=bedroom_1" if href == "/room" else ""))
         assert r is not None and r.status == 200, href
-        if href == "/":
-            _chart_ready(pg, "24h")
         assert pg.evaluate("document.documentElement.scrollWidth") <= size["width"], href
         _shot(pg, f"{name}-{vp}{'-dark' if dark else ''}.png")
     assert_page_healthy(pg, srv)

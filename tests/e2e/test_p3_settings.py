@@ -74,10 +74,17 @@ def test_validation_errors_shown_per_field(
     page: Page, srv: Srv, section: str, path: str, value: str, msg: str
 ) -> None:
     login(page, srv, "alex")
-    page.goto(f"{srv.url}/settings")
-    _open(page, section)
+    dest = {"safety": "/settings/safety", "schedule": "/settings/schedule"}.get(
+        section, "/settings"
+    )
+    page.goto(f"{srv.url}{dest}")
+    if section != "schedule":
+        _open(page, section)
     page.fill(f"[data-path='{path}']", value)
     page.click("[data-testid=settings-save]")
+    if section == "safety":
+        page.fill("[data-testid=confirm-typed]", "SAVE")
+        page.click("[data-testid=confirm-yes]")
     expect(page.locator("[data-testid=errors]")).to_contain_text(msg)
     err = page.locator(f"[data-testid=section-{section}] .field-error:not(:empty)")
     expect(err.first).to_be_visible()
@@ -92,11 +99,12 @@ def test_admin_cannot_change_safety(page: Page, srv: Srv) -> None:
     login(page, srv, "ann")
     page.goto(f"{srv.url}/settings")
     expect(page.locator("[data-testid=safety-note]")).to_be_visible()
-    _open(page, "safety")
-    expect(page.locator("[data-path='safety.floor_tstat_f']")).to_be_disabled()
-    expect(page.locator("[data-path='thermostat.entity_id']")).to_be_disabled()
     assert page.locator("[data-testid=advanced]").count() == 0  # JSON view: Owner only
     assert page.locator("[data-testid=open-wizard]").count() == 0
+    denied = page.goto(f"{srv.url}/settings/safety")
+    assert denied is not None and denied.status == 403
+    page.goto(f"{srv.url}/settings/ha")
+    expect(page.locator("[data-path='thermostat.entity_id']")).to_be_disabled()
     # a forged request is still refused by the API
     res = page.evaluate(
         """async () => {

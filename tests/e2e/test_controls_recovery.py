@@ -18,10 +18,9 @@ from thermabot.app.routes_api import load_settings
 def test_controls_and_recovery_fit_all_screens(page: Page, srv: Srv, width: int) -> None:
     page.set_viewport_size({"width": width, "height": 900})
     login(page, srv, "alex")
-    expect(page.locator("[data-testid=dashboard-controls]")).to_be_visible()
-    expect(page.locator("[data-testid=control-mode]")).to_be_visible()
+    expect(page.locator("[data-testid=quick-actions]")).to_be_visible()
     expect(page.locator("[data-testid=control-pause]")).to_be_visible()
-    expect(page.locator("header [data-testid=kill-open]")).to_have_count(0)
+    expect(page.locator("header [data-testid=kill-open]")).to_have_count(1)
     for path in ("/", "/recovery"):
         page.goto(srv.url + path)
         expect(page.locator("[data-testid=app-version]")).to_have_text(f"v{__version__}")
@@ -35,13 +34,17 @@ def test_controls_and_recovery_fit_all_screens(page: Page, srv: Srv, width: int)
 
 def test_mode_switch_keeps_active_soak_gate(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
-    page.click("[data-testid=control-mode]")
-    page.click("[data-testid=kill-on-active]")
-    expect(page.locator("[data-testid=toast]")).to_have_attribute("data-kind", "error")
+    page.goto(f"{srv.url}/settings/safety")
+    expect(page.locator("[data-testid=kill-on-active]")).to_be_disabled()
+    status = page.evaluate(
+        "async () => (await tb.api('POST', 'api/kill', {enabled: true, mode: 'active'})).status"
+    )
+    assert status == 409
     assert srv.ctx.eff().state == "SHADOW"
     srv.errors.clear()  # expected rejected 409 request is logged by Chromium
-    page.click("[data-testid=control-mode]")
-    page.click("[data-testid=kill-on-shadow]")
+    page.click("[data-testid=kill-open]")
+    page.click("[data-testid=kill-off]")
+    page.click("[data-testid=kill-open]")  # Resume is one tap back to Shadow
     expect(page.locator("[data-testid=toast]")).to_contain_text("watching (Shadow)")
     assert srv.ctx.eff().state == "SHADOW"
     assert_page_healthy(page, srv)
@@ -77,6 +80,7 @@ def test_import_preview_apply_and_backup_workflow(page: Page, srv: Srv, tmp_path
     page.click("[data-testid=kill-open]")
     page.click("[data-testid=kill-off]")
     expect(page.locator("[data-testid=toast]")).to_contain_text("Bot stopped")
+    page.goto(f"{srv.url}/settings")
     page.click("[data-testid=recovery-link]")
     document = page.request.get(srv.url + "/api/config/export").json()
     old_units = document["settings"]["display"]["units"]
@@ -93,6 +97,8 @@ def test_import_preview_apply_and_backup_workflow(page: Page, srv: Srv, tmp_path
     expect(page.locator("[data-testid=import-changes]")).to_contain_text("display")
     assert load_settings(srv.ctx).display.units == old_units
     page.click("[data-testid=config-apply]")
+    page.fill("[data-testid=confirm-typed]", "RESTORE")
+    page.click("[data-testid=confirm-yes]")
     expect(page.locator("[data-testid=toast]")).to_contain_text("Configuration imported")
     assert load_settings(srv.ctx).display.units != old_units
     assert srv.ctx.eff().state == "DISABLED"
@@ -109,8 +115,8 @@ def test_import_preview_apply_and_backup_workflow(page: Page, srv: Srv, tmp_path
 @pytest.mark.parametrize("user", ["ann", "jordan"])
 def test_controls_respect_role(page: Page, srv: Srv, user: str) -> None:
     login(page, srv, user)
-    expect(page.locator("[data-testid=dashboard-controls]")).to_be_visible()
     expect(page.locator("[data-testid=control-mode]")).to_have_count(0)
     expect(page.locator("[data-testid=recovery-link]")).to_have_count(0)
     expect(page.locator("[data-testid=control-pause]")).to_have_count(1 if user == "ann" else 0)
+    expect(page.locator("[data-testid=quick-actions]")).to_have_count(1 if user == "ann" else 0)
     assert_page_healthy(page, srv)

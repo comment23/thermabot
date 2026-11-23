@@ -70,8 +70,8 @@ def test_efficiency_phone_from_more_menu(browser: Browser, srv: Srv) -> None:
     _seed(srv)
     pg = _ctx_page(browser, srv, PHONE)
     login(pg, srv, "jordan")  # any role
-    pg.locator("[data-testid=nav-more] summary").click()
-    pg.click("[data-testid=nav-more] a[href='efficiency']")
+    pg.click("[data-testid=nav] a[href='insights']")
+    pg.click("[data-testid=insights-tabs] a[href='efficiency']")
     pg.wait_for_url("**/efficiency")
     _check(pg, srv, PHONE["width"])
     for el in pg.locator(TAP_SEL).all():

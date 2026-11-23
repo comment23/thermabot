@@ -30,8 +30,8 @@ def _relogin(page: Page, srv: Srv, user: str, pw: str) -> int:
 @pytest.mark.parametrize("user", ["alex", "jordan"])
 def test_change_own_password_on_phone(phone: Page, srv: Srv, user: str) -> None:
     login(phone, srv, user)
-    phone.click("[data-testid=nav-more] > summary")  # Account lives under More on phones
-    phone.click("[data-testid=nav-more] a[href='account']")
+    phone.locator("[data-testid=account-menu] summary").click()
+    phone.click("[data-testid=account-menu] a[href='account']")
     f = phone.locator("[data-testid=password-form]")
     f.locator("input[name=current]").fill(PW)
     f.locator("input[name=new]").fill(NEW)

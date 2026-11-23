@@ -15,7 +15,6 @@ def _role(srv: Srv, name: str) -> str | None:
 
 @pytest.mark.brd("FR-USR-1")
 def test_create_change_role_delete(page: Page, srv: Srv) -> None:
-    page.on("dialog", lambda d: d.accept())
     login(page, srv, "alex")
     page.goto(f"{srv.url}/users")
     f = page.locator("[data-testid=user-form]")
@@ -31,6 +30,8 @@ def test_create_change_role_delete(page: Page, srv: Srv) -> None:
     g.locator("button[type=submit]").click()
     expect(page.locator("tr[data-user=zed]")).to_contain_text("admin")
     page.click("[data-testid=delete-zed]")
+    page.fill("[data-testid=confirm-typed]", "zed")
+    page.click("[data-testid=confirm-yes]")
     expect(page.locator("tr[data-user=zed]")).to_have_count(0)
     assert _role(srv, "zed") is None
     acts = {r[0] for r in srv.ctx.conn.execute("SELECT action FROM audit WHERE actor='alex'")}
