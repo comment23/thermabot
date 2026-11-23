@@ -10,14 +10,10 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d)
 LOG=$WORK/stub.log
 NAME=thermabot-addon-startup-$$
-STUB_PID=""
+STUB=thermabot-stub-$$
 
 cleanup() {
-    if [ -n "$STUB_PID" ]; then
-        kill "$STUB_PID" 2>/dev/null || true
-        wait "$STUB_PID" 2>/dev/null || true
-    fi
-    docker rm -f "$NAME" >/dev/null 2>&1 || true
+    docker rm -f "$NAME" "$STUB" >/dev/null 2>&1 || true
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -51,20 +47,42 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(options, handle)
 PY
 
-STUB_TOKEN=$TOKEN STUB_LOG=$LOG python3 "$ROOT/scripts/addon_supervisor_stub.py" &
-STUB_PID=$!
+# The job user cannot bind port 80. A root process in a host-network container
+# can. `supervisor` is the hostname bashio and HA_URL both use.
+docker run -d --name "$STUB" --network host \
+    --entrypoint /usr/bin/python3 \
+    -e STUB_TOKEN="$TOKEN" \
+    -e STUB_LOG=/log/stub.log \
+    -v "$WORK:/log" \
+    -v "$ROOT/scripts/addon_supervisor_stub.py:/stub.py:ro" \
+    "$IMAGE" /stub.py >/dev/null
+
 i=0
 while [ "$i" -lt 50 ]; do
-    if python3 -c 'import socket; s=socket.create_connection(("127.0.0.1", 80), 0.2); s.close()' \
+    if docker exec "$STUB" /usr/bin/python3 -c \
+        'import socket; s=socket.create_connection(("127.0.0.1", 80), 0.2); s.close()' \
         >/dev/null 2>&1; then
         break
+    fi
+    status=$(docker inspect -f '{{.State.Status}}' "$STUB")
+    if [ "$status" != "running" ]; then
+        echo "supervisor stub exited" >&2
+        docker logs "$STUB" >&2 || true
+        exit 1
     fi
     i=$((i + 1))
     sleep 0.1
 done
+if ! docker exec "$STUB" /usr/bin/python3 -c \
+    'import socket; s=socket.create_connection(("127.0.0.1", 80), 0.2); s.close()' \
+    >/dev/null 2>&1; then
+    echo "supervisor stub did not listen on port 80" >&2
+    docker logs "$STUB" >&2 || true
+    exit 1
+fi
 
-docker run -d --name "$NAME" \
-    --add-host supervisor:host-gateway \
+docker run -d --name "$NAME" --network host \
+    --add-host supervisor:127.0.0.1 \
     -e SUPERVISOR_TOKEN="$TOKEN" \
     -v "$WORK/data:/data" \
     "$IMAGE" >/dev/null
