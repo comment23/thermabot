@@ -1,75 +1,46 @@
 {% extends "base.html" %}
-{% block title %}Settings{% endblock %}
+{% block title %}{{ task_title }}{% endblock %}
 {% block content %}
-<div class="page-head"><h2>Settings</h2></div>
-{% if p.can('edit_safety') %}<p><a href="setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>{% endif %}
+<div class="page-head"><h2>{{ task_title }}</h2></div>
+{% include "partials/settings_nav.html" %}
+{% if p.can('edit_safety') and task == 'comfort' %}
+<p><a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>
+{% endif %}
+{% if task == 'ha' %}
+<p class="meta">Setup never starts Active control. Saving here does not change the run mode.</p>
+{% if p.can('edit_safety') %}<p><a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>{% endif %}
+{% endif %}
+{% if task == 'comfort' %}
 <section class="card" data-testid="bands-summary">
   {% if settings.seasonal_control.enabled %}
   <p data-testid="seasonal-bands-summary">Weather-aware comfort:
-    home {{ settings.seasonal_control.home[0]|num }}–{{ settings.seasonal_control.home[1]|num }}°F;
-    sleep {{ settings.seasonal_control.sleep[0]|num }}–{{ settings.seasonal_control.sleep[1]|num }}°F.
-    Automatic heat/cool mode widens ranges as needed to maintain the write deadband.</p>
-  <p><small>The table below supplies the away bands; its home and sleep bands are used only
-    when weather-aware comfort is disabled.</small></p>
+    home {{ settings.seasonal_control.home[0]|temp(units) }}–{{ settings.seasonal_control.home[1]|temp(units) }};
+    sleep {{ settings.seasonal_control.sleep[0]|temp(units) }}–{{ settings.seasonal_control.sleep[1]|temp(units) }}.</p>
   {% endif %}
   <table><thead><tr><th>Season</th><th>Home</th><th>Sleep</th><th>Away</th></tr></thead><tbody>
   {% for s in ['heat', 'cool'] %}{% set b = settings.bands[s] %}<tr><td>{{ s }}</td>
     <td>{{ b.home[0]|num }}-{{ b.home[1]|num }}</td><td>{{ b.sleep[0]|num }}-{{ b.sleep[1]|num }}</td><td>{{ b.away[0]|num }}-{{ b.away[1]|num }}</td></tr>{% endfor %}
   </tbody></table>
-  <small>°F (stored){% if units == 'C' %}; the forms below show °C{% endif %}</small>
+  <small>Stored internally. This form shows the display unit.</small>
 </section>
+{% endif %}
+{% if not p.can('edit_safety') and task == 'comfort' %}
+<p data-testid="safety-note"><strong>Safety, the thermostat, and off rules need an Owner. Changes there are rejected.</strong></p>
+{% endif %}
 <form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
-      data-settings='{{ settings_json }}' novalidate>
-  <p><small>Bands, schedule, weights, tolerances and guardrails within hard limits.
-    {% if not p.can('edit_safety') %}<strong data-testid="safety-note">The <code>thermostat</code>,
-    <code>safety</code> and <code>off</code> sections need an Owner; changes there are rejected.</strong>{% endif %}
-    Safety, off and write limits are tighten-only. Temperatures are in °{{ units }}.</small></p>
-  {% for sec in sections %}
-  <details class="section" data-section="{{ sec.name }}" data-testid="section-{{ sec.name }}"{% if loop.index <= 3 %} open{% endif %}>
-    <summary>{{ sec.title }}{% if sec.locked %} <small>(Owner)</small>{% endif %}</summary>
-    {% if sec.name == 'seasonal_control' %}
-    <p><small>The 24-hour outdoor forecast guides heat-only or cool-only operation, with
-      indoor comfort taking precedence. Home and sleep bands change at their scheduled times,
-      without early preconditioning. A missing reading or safety restore can require automatic
-      mode, which keeps the configured heat/cool deadband.</small></p>
-    {% endif %}
-    <fieldset{% if sec.locked %} disabled{% endif %}>
-    {% for f in sec.fields %}
-      {% if f.kind == 'bool' %}
-      <label class="field" for="{{ f.id }}"><input type="checkbox" role="switch" id="{{ f.id }}" data-path="{{ f.path }}" data-kind="bool"{% if f.value %} checked{% endif %}> {{ f.label }}</label>
-      {% elif f.kind == 'select' %}
-      <label class="field" for="{{ f.id }}">{{ f.label }}
-        <select id="{{ f.id }}" data-path="{{ f.path }}" data-kind="select">{% for c in f.choices %}<option{% if c == f.value|string %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
-      {% else %}
-      <label class="field" for="{{ f.id }}">{{ f.label }}{% if f.kind in ('temp', 'delta') %} <small>°{{ units }}</small>{% endif %}
-        <input id="{{ f.id }}" data-path="{{ f.path }}" data-kind="{{ f.kind }}"
-          {% if f.kind in ('temp', 'delta', 'number', 'int') %}type="number" step="any" inputmode="decimal"{% else %}type="text"{% endif %}
-          {% if f.f_value is not none %}data-f="{{ f.f_value }}"{% endif %}{% if f.nullable %} data-nullable="1"{% endif %}
-          value="{{ f.value if f.value is not none else '' }}"{% if f.kind == 'list' %} placeholder="comma separated"{% endif %}></label>
-      {% endif %}
-      <small class="field-error" data-error-for="{{ f.path }}"></small>
-    {% endfor %}
-    </fieldset>
-    {% if sec.name == 'weather' %}
-    <div data-weather-tools data-provider="#f-weather-provider" data-lat="#f-weather-lat" data-lon="#f-weather-lon"
-      data-units="{{ units }}" data-testid="weather-tools">
-      <p><small>Empty latitude/longitude = Home Assistant's home location. Open-Meteo is global and
-        keyless; NWS covers the US only. A test fetch saves nothing.</small></p>
-      <button type="button" class="secondary outline" data-weather="ha-location" data-testid="weather-ha-location">Use HA home location</button>
-      <button type="button" class="secondary" data-weather="test" data-testid="weather-test">Test fetch</button>
-      <div class="result" data-testid="weather-result" aria-live="polite"></div>
-    </div>
-    {% endif %}
-  </details>
-  {% endfor %}
+      data-settings='{{ settings_json }}' {% if task == 'safety' %}data-review="safety"{% endif %} novalidate>
+  <p class="meta">Temperatures in this form use the display unit. Safety, off, and write limits are tighten-only.</p>
+  {% include "partials/settings_fields.html" %}
   <p class="errors" data-testid="errors"></p>
   <button type="submit" data-testid="settings-save">Save</button>
 </form>
-{% if p.can('edit_safety') %}
+{% if p.can('edit_safety') and task in ('comfort', 'advanced') %}
 <details class="section" data-testid="advanced"><summary>Advanced: settings as JSON (read only)</summary>
-  <textarea class="code" rows="20" readonly spellcheck="false" data-testid="settings-json">{{ settings_json }}</textarea>
+  <textarea class="code" rows="16" readonly spellcheck="false" data-testid="settings-json">{{ settings_json }}</textarea>
 </details>
 {% endif %}
-<script src="{{ asset('weather.js') }}"></script>
-<script src="{{ asset('settings.js') }}"></script>
+{% if task == 'ha' %}
+<script src="{{ up }}{{ asset('weather.js') }}"></script>
+{% endif %}
+<script src="{{ up }}{{ asset('settings.js') }}"></script>
 {% endblock %}

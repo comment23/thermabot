@@ -6,7 +6,7 @@
 <table data-testid="users" class="cards"><thead><tr><th>User</th><th>Role</th><th>Room</th><th></th></tr></thead><tbody>
 {% for u in users %}<tr data-user="{{ u.username }}"><td>{{ u.username }}</td><td data-label="Role">{{ u.role }}</td><td data-label="Room">{{ u.room or '—' }}</td>
   <td>{% if u.username != p.username %}<button class="secondary outline" data-api="DELETE api/users/{{ u.id }}"
-    data-confirm="Delete {{ u.username }}?" data-done="Deleted" data-reload data-testid="delete-{{ u.username }}">Delete</button>{% endif %}</td></tr>
+    data-confirm="This removes the account and signs {{ u.username }} out." data-confirm-title="Delete {{ u.username }}" data-confirm-typed="{{ u.username }}" data-done="Deleted" data-reload data-testid="delete-{{ u.username }}">Delete</button>{% endif %}</td></tr>
 {% endfor %}</tbody></table>
 </section>
 <section class="card"><h3>Add user</h3>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Safety and control{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Safety and control</h2>
+  <p class="meta">Stop is always one tap. Active waits until every check passes, and the server still enforces the soak.</p></div>
+{% include "partials/settings_nav.html" %}
+<div class="mode-cards">
+  <article class="card mode-card{% if mode.key == 'stopped' %} current{% endif %}" data-testid="mode-stopped">
+    <h3>Stopped</h3>
+    <p>The bot does not change the thermostat. The thermostat keeps its current settings.</p>
+    {% if kill != 'on' and p.can('kill_on') %}
+    <button type="button" class="resume" data-kill="resume" data-testid="safety-resume">Resume in Shadow</button>
+    {% endif %}
+  </article>
+  <article class="card mode-card{% if mode.key == 'shadow' %} current{% endif %}" data-testid="mode-shadow">
+    <h3>Shadow</h3>
+    <p>The bot plans and logs what it would send. Nothing is written to the thermostat.</p>
+    <p class="meta" data-testid="shadow-days">{{ '%.1f'|format(shadow_days) }} of {{ shadow_min_days }} days</p>
+  </article>
+  <article class="card mode-card{% if mode.key == 'active' %} current{% endif %}" data-testid="mode-active">
+    <h3>Active</h3>
+    <p>The bot can write setpoints after every safety check passes.</p>
+    {% if readiness %}
+    <ul class="checklist" data-testid="readiness" data-ready="{{ 'yes' if readiness.ready else 'no' }}">
+      {% for ch in readiness.checks %}
+      <li class="check-row" data-ok="{{ 'yes' if ch.ok else 'no' }}" data-check="{{ ch.id }}">
+        <i class="dot" aria-hidden="true"></i> {{ ch.label }} <span class="meta">{{ ch.detail }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if readiness.first_write %}<p data-testid="first-write">First write: {{ readiness.first_write }}</p>{% endif %}
+    {% if p.can('set_active') %}
+    <label>Type ACTIVE to confirm
+      <input id="active-word" data-testid="active-word" autocomplete="off" {% if not readiness.ready %}disabled{% endif %}></label>
+    <button type="button" class="contrast" data-kill="on-active" data-testid="kill-on-active" disabled>Go Active</button>
+    {% endif %}
+    {% endif %}
+  </article>
+</div>
+<h3>Last 24 hours</h3>
+<section class="card">
+  {% if recent_decisions %}
+  <table class="cards" data-testid="recent-decisions"><thead><tr><th>When</th><th>Outcome</th><th>Guard</th><th>Note</th></tr></thead><tbody>
+  {% for row in recent_decisions %}<tr><td>{{ row.ts|localtime }}</td><td>{{ row.outcome }}</td><td>{{ row.guard or '—' }}</td><td>{{ row.reason }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="meta">No would-write or blocked decisions in the last 24 hours.</p>{% endif %}
+</section>
+<form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
+      data-review="safety" data-settings='{{ settings_json }}' novalidate>
+  <p class="meta">Limits can only be tightened. A diff is shown before anything is saved.</p>
+  {% include "partials/settings_fields.html" %}
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit" data-testid="settings-save">Save</button>
+</form>
+<script src="{{ up }}{{ asset('settings.js') }}"></script>
+{% endblock %}

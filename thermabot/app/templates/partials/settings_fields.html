@@ -1,0 +1,34 @@
+{% for sec in sections %}
+<details class="section" data-section="{{ sec.name }}" data-testid="section-{{ sec.name }}"{% if loop.index <= 2 %} open{% endif %}>
+  <summary>{{ sec.title }}{% if sec.locked %} <small>(Owner)</small>{% endif %}</summary>
+  {% if sec.name == 'seasonal_control' %}
+  <p class="meta">The 24-hour outdoor forecast guides heat-only or cool-only operation. Home and sleep bands change at their scheduled times.</p>
+  {% endif %}
+  <fieldset{% if sec.locked %} disabled{% endif %}>
+  {% for f in sec.fields %}
+    {% if f.kind == 'bool' %}
+    <label class="field" for="{{ f.id }}"><input type="checkbox" role="switch" id="{{ f.id }}" data-path="{{ f.path }}" data-kind="bool"{% if f.value %} checked{% endif %}> {{ f.label }}</label>
+    {% elif f.kind == 'select' %}
+    <label class="field" for="{{ f.id }}">{{ f.label }}
+      <select id="{{ f.id }}" data-path="{{ f.path }}" data-kind="select">{% for c in f.choices %}<option{% if c == f.value|string %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+    {% else %}
+    <label class="field" for="{{ f.id }}">{{ f.label }}{% if f.kind in ('temp', 'delta') %} <small data-unit>°</small>{% endif %}
+      <input id="{{ f.id }}" data-path="{{ f.path }}" data-kind="{{ f.kind }}"
+        {% if f.kind in ('temp', 'delta', 'number', 'int') %}type="number" step="any" inputmode="decimal"{% else %}type="text"{% endif %}
+        {% if f.f_value is not none %}data-f="{{ f.f_value }}"{% endif %}{% if f.nullable %} data-nullable="1"{% endif %}
+        value="{{ f.value if f.value is not none else '' }}"{% if f.kind == 'list' %} placeholder="comma separated"{% endif %}></label>
+    {% endif %}
+    <small class="field-error" data-error-for="{{ f.path }}"></small>
+  {% endfor %}
+  </fieldset>
+  {% if sec.name == 'weather' %}
+  <div data-weather-tools data-provider="#f-weather-provider" data-lat="#f-weather-lat" data-lon="#f-weather-lon"
+    data-units="{{ units }}" data-testid="weather-tools">
+    <p class="meta">Empty latitude and longitude use Home Assistant's home location. A test fetch saves nothing.</p>
+    <button type="button" class="secondary outline" data-weather="ha-location" data-testid="weather-ha-location">Use HA home location</button>
+    <button type="button" class="secondary" data-weather="test" data-testid="weather-test">Test fetch</button>
+    <div class="result" data-testid="weather-result" aria-live="polite"></div>
+  </div>
+  {% endif %}
+</details>
+{% endfor %}

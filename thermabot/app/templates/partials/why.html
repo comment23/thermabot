@@ -1,0 +1,20 @@
+<div class="why" data-testid="why">
+  <h3>Why this?</h3>
+  <p>{{ why.sentence }}</p>
+  <h4>Why</h4>
+  <ul>{% for f in why.step.factors %}
+    <li><span class="label">{{ f.tag }}</span> {{ f.text }}{% if f.source %} · {{ f.source }}{% endif %}{% if f.age %} · {{ f.age }}{% endif %}</li>
+  {% endfor %}</ul>
+  <h4>Predicted effect</h4>
+  <p>Comfort {{ why.step.score if why.step.score is not none else '—' }}.
+    Inside {{ why.step.pred_t|temp(units) }}.
+    {% if why.coldest %}Coldest room {{ why.coldest.room }} at {{ why.coldest.temp }}.{% endif %}
+    {% if why.step.pred_u is not none %}Duty {{ '%.2f'|format(why.step.pred_u) }} versus holding the setpoint.{% endif %}</p>
+  <h4>Safety checks</h4>
+  <ol class="guard-list" data-testid="guard-list">
+  {% for label, ok, note in why.checks %}
+    <li class="guard-row" data-ok="{{ 'yes' if ok else 'no' }}"><i class="dot" aria-hidden="true"></i>
+      <span>{{ label }}</span> <span class="meta">{{ 'Passed' if ok else note }}</span></li>
+  {% endfor %}
+  </ol>
+</div>

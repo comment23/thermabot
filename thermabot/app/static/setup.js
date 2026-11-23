@@ -43,6 +43,12 @@
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
 
   // ---- navigation ----
+  function ageNote(e) {
+    if (!e.last_changed) return '';
+    const mins = Math.round((Date.now() - Date.parse(e.last_changed)) / 60000);
+    if (!Number.isFinite(mins) || mins < 0) return '';
+    return mins > 60 ? ` · stale ${mins} min (still selectable)` : ` · ${mins} min ago`;
+  }
   function go(n) {
     step = Math.max(1, Math.min(7, n));
     for (const s of $$('section[data-step]')) s.hidden = Number(s.dataset.step) !== step;
@@ -56,6 +62,10 @@
     if (step === 5) renderBands();
     if (step === 6) renderWeather();
     if (step === 7) renderReview();
+    const done = $$('.steps li.done').length;
+    const rail = document.querySelector('[data-testid=setup-rail-summary]');
+    if (rail) rail.textContent = `${done} of 7 steps finished. Setup never starts Active control.`;
+    try { sessionStorage.setItem('thermabot-setup-step', String(step)); } catch (_) { /* private mode */ }
     window.scrollTo(0, 0);
   }
 
@@ -113,7 +123,7 @@
       <label class="pick" data-entity="${esc(e.entity_id)}">
         <input type="radio" name="tstat" value="${esc(e.entity_id)}"${e.entity_id === st.thermostat.entity_id ? ' checked' : ''}>
         <span><strong>${esc(e.name)}</strong> <code>${esc(e.entity_id)}</code><br>
-        <small>state ${esc(e.state)}${e.current_temperature != null ? ', ' + climateTemp(e) : ''}
+        <small>state ${esc(e.state)}${e.current_temperature != null ? ', ' + climateTemp(e) : ''}${ageNote(e)}
         · modes ${esc(e.hvac_modes.join(', ') || '—')} · fan ${esc(e.fan_modes.join(', ') || '—')}
         · ${esc(capabilities(e) || 'temperature control capabilities not reported')}
         ${e.preset_modes.length ? `· presets ${esc(e.preset_modes.join(', '))}` : ''}</small></span>
@@ -436,7 +446,7 @@
       if (hl > hh) { bad.push(`heat ${b}: low is above high`); mark('heat', b, 0); }
       if (cl > ch) { bad.push(`cool ${b}: low is above high`); mark('cool', b, 0); }
       if (hh > cl) { bad.push(`${b}: heat high must not be above cool low`); mark('heat', b, 1); mark('cool', b, 0); }
-      if (ch - hl < db) { bad.push(`${b}: cool high − heat low must be at least ${db}°F`); mark('cool', b, 1); mark('heat', b, 0); }
+      if (ch - hl < db) { bad.push(`${b}: cool high − heat low must be at least ${db} degrees`); mark('cool', b, 1); mark('heat', b, 0); }
     }
     return bad.join('\n');
   }
@@ -519,5 +529,10 @@
     else if (a === 'save') save();
   });
 
-  go(1);
+  let start = 1;
+  try {
+    const saved = Number(sessionStorage.getItem('thermabot-setup-step') || '1');
+    if (saved > 1 && st.thermostat.entity_id) start = Math.min(7, saved);
+  } catch (_) { /* private mode */ }
+  go(start);
 })();

@@ -1,0 +1,26 @@
+<section id="home-now" class="card now" data-testid="now" data-state="{{ eff.state }}"{% if stale_tstat %} data-stale="1"{% endif %}>
+  <p class="label">Right now</p>
+  {% if eff.label == 'SETUP NEEDED' %}
+  <p class="banner" data-testid="setup-needed">Setup needed: no thermostat is configured, so the bot reads no climate entity and never writes to Home Assistant.
+    {% if p and p.can('edit_safety') %}<a href="{{ up }}setup" data-testid="setup-link">Run setup</a>{% else %}Ask an Owner to run setup.{% endif %}</p>
+  {% elif not snap %}
+  <p class="skeleton" data-testid="no-snapshot">Waiting for the first thermostat reading</p>
+  <p>Comfort <strong data-testid="score">{{ '%.0f'|format(score) if score is not none else '—' }}</strong></p>
+  {% else %}
+  <div class="now-main">
+    <strong class="hero-temp{% if stale_tstat %} dim{% endif %}" data-testid="tstat-temp">{{ snap.thermostat.current_temp|temp(units) }}</strong>
+    <span class="action-pill {{ snap.thermostat.hvac_action or snap.thermostat.hvac_mode }}"><span data-testid="hvac-mode">{{ snap.thermostat.hvac_mode }}</span>{% if snap.thermostat.hvac_action %} · {{ snap.thermostat.hvac_action }}{% endif %}</span>
+  </div>
+  {% if stale_tstat %}<p class="banner">Writes paused until a fresh reading. Last reading {{ snap.thermostat.last_reported|localtime }}.</p>{% endif %}
+  <div class="gauge" data-testid="gauge" style="--heat: {{ snap.thermostat.heat_sp or 60 }}; --cool: {{ snap.thermostat.cool_sp or 80 }}; --here: {{ snap.thermostat.current_temp or 70 }};">
+    <span class="gauge-heat">Heat {{ snap.thermostat.heat_sp|temp(units) }}</span>
+    <span class="gauge-bar" aria-hidden="true"><i></i></span>
+    <span class="gauge-cool">Cool {{ snap.thermostat.cool_sp|temp(units) }}</span>
+  </div>
+  <p class="meta">Comfort <strong data-testid="score">{{ '%.0f'|format(score) if score is not none else '—' }}</strong>
+    {% if snap.thermostat.outdoor_temp is not none %} · Outdoor {{ snap.thermostat.outdoor_temp|temp(units) }}{% endif %}</p>
+  {% endif %}
+  {% if eff.state == 'DEGRADED' %}<p class="banner" data-testid="degraded">Needs attention
+    ({{ eff.degraded_reason }}): {{ 'Home Assistant or the thermostat is unreachable. Plan writes are paused.' if eff.degraded_reason == 'ha' else ('No HVAC sensors are configured. Plan writes are paused.' if eff.degraded_reason == 'sensors' else 'Weather is stale. Using the fallback plan.') }}</p>{% endif %}
+  {% if eff.state == 'DISABLED' and eff.label != 'SETUP NEEDED' %}<p class="banner" data-testid="disabled">Stopped. The thermostat keeps its own settings.</p>{% endif %}
+</section>

@@ -28,6 +28,13 @@
   });
   $('#config-apply').addEventListener('click', async () => {
     if (!pending) return;
+    const ok = await window.tb.ask({
+      title: 'Restore this configuration',
+      body: $('#import-changes').textContent || 'Apply the uploaded configuration.',
+      typed: 'RESTORE',
+      confirm: 'Restore',
+    });
+    if (!ok) return;
     const button = $('#config-apply');
     button.disabled = true;
     error('');

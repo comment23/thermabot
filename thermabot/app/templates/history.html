@@ -1,7 +1,24 @@
 {% extends "base.html" %}
 {% block title %}History{% endblock %}
 {% block content %}
-<div class="page-head"><h2>History &amp; Savings</h2></div>
+<div class="page-head"><h2>Insights</h2></div>
+{% include "partials/insights_tabs.html" %}
+<section class="card" data-testid="history-card" data-history-card data-range="24h" data-units="{{ units }}">
+  <div class="card-head"><h3>Recent</h3>
+    <div class="seg-btns" role="group" aria-label="History range" data-testid="history-range">
+      {% for r, lbl in [('24h', '24 h'), ('7d', '7 days'), ('30d', '30 days')] %}<button type="button" data-range="{{ r }}"
+        aria-pressed="{{ 'true' if r == '24h' else 'false' }}" data-testid="range-{{ r }}">{{ lbl }}</button>{% endfor %}
+    </div></div>
+  <figure class="chart-card">
+    <div class="chart" data-chart="history" data-testid="history-chart" role="img"
+      aria-label="Indoor and outdoor temperature, setpoints and heating, cooling and fan run time"></div>
+  </figure>
+  <details class="fallback" data-testid="history-fallback"><summary>Show as a table</summary>
+    <table class="cards" data-testid="history-table"><thead><tr><th>Time</th><th>Indoor</th><th>Outdoor</th><th>Heat to</th><th>Cool to</th><th>Heat</th><th>Cool</th><th>Fan</th></tr></thead>
+    <tbody><tr><td colspan="8">Loading…</td></tr></tbody></table>
+  </details>
+</section>
+<div class="page-head"><h2>History and savings</h2></div>
 <nav class="seg" aria-label="Range"><ul>{% for d in [7, 30, 90] %}<li><a href="history?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ d }} days</a></li>{% endfor %}</ul></nav>
 <section class="card" data-testid="savings">
   {% if savings.counted and savings.saved_h is not none %}

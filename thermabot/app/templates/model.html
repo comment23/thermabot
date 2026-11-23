@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Model{% endblock %}
 {% block content %}
-<div class="page-head"><h2>Thermal Model</h2></div>
+{% include "partials/insights_tabs.html" %}
+<div class="page-head"><h2>Model</h2></div>
 <section class="actions">
   <button data-api="POST api/model/refit" data-done="Refit started" data-testid="refit">Refit now</button>
   <button class="secondary" data-api="POST api/alerts/test" data-done="Test alert sent"
@@ -12,7 +13,7 @@
 {% else %}
 <section class="card"><p data-testid="model-meta">Version {{ model.version }} · fitted {{ model.fitted_at|localtime('%Y-%m-%d %H:%M') }}
   · {{ model.n_samples or 0 }} samples</p>
-<h3>Accuracy (MAE °F)</h3>
+<h3>Accuracy (MAE)</h3>
 <table data-testid="mae"><tbody>
 {% for k, v in model.mae.items() %}{% set lim = mae_ok.tstat if k in ('tstat', 'thermostat') else mae_ok.room %}
 <tr data-key="{{ k }}"><td>{{ k }}</td><td class="{{ 'stale' if v is not none and v > lim else '' }}">{{ '%.2f'|format(v) if v is not none else '—' }}{% if v is not none and v > lim %} (above {{ lim|num }}){% endif %}</td></tr>{% endfor %}
@@ -23,7 +24,7 @@
 </tbody></table>
 <h3>Room offsets</h3>
 <table data-testid="offsets"><tbody>
-{% for k, v in offsets.items() %}<tr data-key="{{ k }}"><td>{{ k }}</td><td>{{ '%+.2f'|format(v) }} °F</td></tr>
+{% for k, v in offsets.items() %}<tr data-key="{{ k }}"><td>{{ k }}</td><td>{{ v|temp(units, true) }}</td></tr>
 {% else %}<tr><td>No room offsets fitted.</td></tr>{% endfor %}
 </tbody></table>
 </section>

@@ -1,0 +1,7 @@
+<nav class="seg" data-testid="insights-tabs" aria-label="Insights"><ul>
+  <li><a href="{{ up }}history"{% if path in ('/history', '/insights') %} aria-current="page"{% endif %}>History</a></li>
+  <li><a href="{{ up }}shadow"{% if path == '/shadow' %} aria-current="page"{% endif %}>Shadow</a></li>
+  <li><a href="{{ up }}efficiency"{% if path == '/efficiency' %} aria-current="page"{% endif %}>Efficiency</a></li>
+  <li><a href="{{ up }}forecast"{% if path == '/forecast' %} aria-current="page"{% endif %}>Forecast</a></li>
+  {% if p.can('view_model') %}<li><a href="{{ up }}model"{% if path == '/model' %} aria-current="page"{% endif %}>Model</a></li>{% endif %}
+</ul></nav>

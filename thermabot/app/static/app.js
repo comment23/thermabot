@@ -35,6 +35,19 @@
     });
   }
   const csrf = () => ($('meta[name=csrf-token]') || {}).content || '';
+  const prefix = () => ($('meta[name=tb-root]') || {}).content || '';
+  function abs(path) {
+    if (!path || /^(https?:|data:)/.test(path)) return path;
+    return prefix() + String(path).replace(/^\//, '');
+  }
+  function temp(f, units, delta) {
+    if (f == null || f === '' || Number.isNaN(Number(f))) return '—';
+    let v = Number(f);
+    const c = units === 'C';
+    if (c) v = delta ? Math.round(v * 5 / 9 * 10) / 10 : Math.round((v - 32) * 50 / 9) / 10;
+    const body = c ? v.toFixed(1) : String(Math.round(v * 1000) / 1000).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    return (delta && v > 0 ? '+' : '') + body + '°' + (c ? 'C' : 'F');
+  }
 
   function toast(msg, kind) {
     const t = $('#toast');
@@ -49,7 +62,7 @@
   async function api(method, path, body) {
     let r;
     try {
-      r = await fetch(path, {
+      r = await fetch(abs(path), {
         method, credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -70,18 +83,80 @@
     return d || ('HTTP ' + res.status);
   }
 
-  window.tb = { api, toast, detail };
+  function ask(opts) {
+    const dlg = $('#confirm-sheet');
+    if (!dlg) return Promise.resolve(!opts || !opts.body || window.confirm(opts.body));
+    return new Promise((resolve) => {
+      const opener = document.activeElement;
+      $('#confirm-title').textContent = opts.title || 'Confirm';
+      $('#confirm-body').textContent = opts.body || '';
+      const typed = opts.typed || '';
+      const word = $('#confirm-typed-word');
+      const label = $('#confirm-typed-label');
+      const input = $('#confirm-typed');
+      const yes = $('#confirm-yes');
+      word.textContent = typed;
+      label.hidden = !typed;
+      input.value = '';
+      yes.textContent = opts.confirm || 'Confirm';
+      yes.disabled = !!typed;
+      const onInput = () => { yes.disabled = typed && input.value !== typed; };
+      input.oninput = onInput;
+      function finish(ok) {
+        dlg.removeEventListener('close', onClose);
+        yes.onclick = null;
+        $('#confirm-no').onclick = null;
+        dlg.close();
+        if (opener && opener.focus) opener.focus();
+        resolve(ok);
+      }
+      function onClose() { finish(false); }
+      yes.onclick = () => { if (!yes.disabled) { dlg.removeEventListener('close', onClose); finish(true); } };
+      $('#confirm-no').onclick = () => finish(false);
+      dlg.addEventListener('close', onClose);
+      dlg.showModal();
+      (typed ? input : yes).focus();
+    });
+  }
+  window.tb = { api, toast, detail, temp, ask, abs };
   document.addEventListener('htmx:configRequest', (e) => { e.detail.headers['X-CSRF-Token'] = csrf(); });
 
   // ---- live state: SSE, else poll /api/status every 30 s (FR-UI-2) ----
+  function modeText(s) {
+    if (!s) return '';
+    if (s.label === 'SETUP NEEDED') return 'Setup needed';
+    if (s.state === 'DISABLED') return 'Stopped';
+    const active = s.state === 'ACTIVE' || (s.label || '').indexOf('ACTIVE') === 0;
+    return active ? 'Active' : 'Shadow';
+  }
+  let announced = '';
   function setState(s) {
     const b = $('#state-badge');
     if (!b || !s || !s.state) return;
+    const text = modeText(s);
+    const prev = b.dataset.state;
     b.dataset.state = s.state;
     b.dataset.label = s.label || s.state;
-    b.textContent = s.label || s.state;
+    b.dataset.mode = text === 'Active' ? 'active' : (text === 'Stopped' || text === 'Setup needed' ? 'stopped' : 'shadow');
+    if (s.state === 'DEGRADED') b.dataset.degraded = s.degraded_reason || b.dataset.degraded || 'yes';
+    else delete b.dataset.degraded;
+    const label = $('.mode-text', b);
+    if (label) label.textContent = text; else b.textContent = text;
     const warning = $('#ha-connection-warning');
     if (warning && s.ha_health) warning.hidden = s.ha_health !== 'down';
+    const ha = $('[data-testid=ha-chip]');
+    if (ha && s.ha_health) {
+      ha.dataset.health = s.ha_health;
+      ha.lastChild.textContent = ' HA ' + (s.ha_health === 'down' ? 'down' : s.ha_health);
+    }
+    const live = $('#live-status');
+    if (live && prev && prev !== s.state && announced !== text) {
+      announced = text;
+      live.textContent = 'Mode is ' + text;
+    }
+    const tag = $('#live-tag');
+    if (tag) tag.textContent = document.documentElement.dataset.live === 'poll'
+      ? 'updated just now · reconnecting' : 'live';
   }
   let polling = null;
   async function poll() {
@@ -96,12 +171,14 @@
   function startLive() {
     if (!$('#state-badge')) return;
     if (!window.EventSource || document.documentElement.dataset.nosse) { startPolling(); return; }
-    const es = new EventSource('events');
+    const es = new EventSource(abs('events'));
     es.addEventListener('open', () => { document.documentElement.dataset.live = 'sse'; });
     es.addEventListener('state', (e) => setState(JSON.parse(e.data)));
     for (const ev of ['snapshot', 'plan', 'alert']) {
-      es.addEventListener(ev, (e) => document.dispatchEvent(
-        new CustomEvent('tb:' + ev, { detail: JSON.parse(e.data) })));
+      es.addEventListener(ev, (e) => {
+        document.dispatchEvent(new CustomEvent('tb:' + ev, { detail: JSON.parse(e.data) }));
+        if (ev !== 'alert') refreshHome(ev);
+      });
     }
     es.onerror = () => { es.close(); startPolling(); };
     window.addEventListener('pagehide', () => es.close());
@@ -121,38 +198,53 @@
   }
 
   // ---- stop/start dialog (FR-KILL-1/3; 'kill switch' internally): reads /api/status, then POST /api/kill ----
-  function botLabel(on, mode) {
-    if (!on) return 'Bot: Stopped';
-    return mode === 'active' ? 'Bot: Controlling' : 'Bot: Watching (Shadow)';
-  }
   function showBot(kill, mode) {
     const on = kill === 'on';
-    const k = $('#kill-state');
-    if (k) { k.dataset.on = kill; k.dataset.mode = mode || ''; k.textContent = botLabel(on, mode); }
     const b = $('#kill-open');
     if (b) {
-      b.textContent = on ? 'Stop bot' : 'Start bot';
-      b.className = on ? 'stop' : 'start';
+      b.textContent = on ? 'Stop' : 'Resume';
+      b.className = on ? 'stop' : 'resume';
+      b.dataset.kill = on ? 'open' : 'resume';
       b.hidden = !on && b.dataset.canStart !== '1';
     }
+    const badge = $('#state-badge');
+    if (badge && !on) {
+      const label = $('.mode-text', badge);
+      if (label) label.textContent = 'Stopped';
+      badge.dataset.mode = 'stopped';
+    } else if (badge && on) {
+      const label = $('.mode-text', badge);
+      const text = mode === 'active' ? 'Active' : 'Shadow';
+      if (label) label.textContent = text;
+      badge.dataset.mode = mode === 'active' ? 'active' : 'shadow';
+    }
   }
-  async function openKill(chooseMode = false) {
-    const dlg = $('#kill-dialog');
+  async function openStop() {
+    const dlg = $('#stop-sheet');
+    const opener = document.activeElement;
     const st = await api('GET', 'api/status');
     if (!st.ok) { toast(detail(st), 'error'); return; }
-    const on = !chooseMode && st.data.kill_switch === 'on';
-    $('#kill-off', dlg).hidden = !on;
-    $('#kill-on', dlg).hidden = on;
-    dlg.setAttribute('aria-labelledby', on ? 'kill-off-title' : 'kill-on-title');
-    const off = st.data.snapshot && st.data.snapshot.hvac_mode === 'off';
-    $('#kill-off-warning', dlg).hidden = !off;
-    $('#kill-restore-choices', dlg).hidden = !off;
+    const snap = st.data.snapshot || {};
+    const units = (document.querySelector('[data-units]') || {}).dataset;
+    const u = (units && units.units) || 'F';
+    const keeps = $('#stop-keeps');
+    if (keeps) {
+      const heat = snap.heat_sp == null ? '' : 'Heat ' + temp(snap.heat_sp, u);
+      const cool = snap.cool_sp == null ? '' : 'Cool ' + temp(snap.cool_sp, u);
+      keeps.textContent = 'It keeps ' + (snap.hvac_mode || 'its current mode')
+        + (heat || cool ? ' · ' + [heat, cool].filter(Boolean).join(' · ') : '') + '.';
+    }
+    const off = snap.hvac_mode === 'off';
+    $('#kill-off-warning').hidden = !off;
+    $('#kill-restore-choices').hidden = !off;
+    $('[data-testid=kill-off]').hidden = off;
+    dlg._opener = opener;
     dlg.showModal();
   }
   async function submitKill(body) {
-    const dlg = $('#kill-dialog');
+    const dlg = $('#stop-sheet');
     const res = await api('POST', 'api/kill', body);
-    dlg.close();
+    if (dlg && dlg.open) dlg.close();
     if (!res.ok) { toast(detail(res), 'error'); return; }
     setState(res.data);
     showBot(res.data.kill_switch, res.data.run_mode);
@@ -162,6 +254,13 @@
       + (res.data.restore ? ', restore: ' + res.data.restore : '')
       + (res.data.mirror_ok ? '' : ', HA mirror not confirmed'),
       res.data.restore === 'failed' ? 'error' : 'ok');
+  }
+  function refreshHome(which) {
+    if (!document.getElementById('home-now') || !window.htmx) return;
+    const names = which === 'plan' ? ['next', 'timeline'] : ['now', 'rooms'];
+    for (const n of names) {
+      window.htmx.ajax('GET', abs('partials/' + n), { target: '#home-' + n, swap: 'outerHTML' });
+    }
   }
 
   // ---- generic API forms/buttons: <form data-api="PUT api/settings"> ----
@@ -178,7 +277,15 @@
   }
   async function send(el, spec, body) {
     const [method, path] = spec.split(' ');
-    if (el.dataset.confirm && !confirm(el.dataset.confirm)) return;
+    if (el.dataset.confirm) {
+      const ok = await ask({
+        title: el.dataset.confirmTitle || 'Confirm',
+        body: el.dataset.confirm,
+        typed: el.dataset.confirmTyped || '',
+        confirm: el.dataset.confirmTyped ? 'Delete' : 'Confirm',
+      });
+      if (!ok) return;
+    }
     const res = await api(method, path, body);
     const errs = el.closest('form, section') && $('.errors', el.closest('form, section'));
     if (errs) errs.textContent = res.ok ? '' : detail(res);
@@ -203,14 +310,29 @@
     if (!k) return;
     e.preventDefault();
     const a = k.dataset.kill;
-    if (a === 'open') openKill();
-    else if (a === 'mode') openKill(true);
-    else if (a === 'cancel') $('#kill-dialog').close();
+    if (a === 'open') openStop();
+    else if (a === 'resume' || a === 'on-shadow') submitKill({ enabled: true, mode: 'shadow' });
+    else if (a === 'cancel') { const dlg = $('#stop-sheet'); if (dlg) dlg.close(); }
     else if (a === 'off-band') submitKill({ enabled: false, restore: 'band' });
     else if (a === 'off-leave') submitKill({ enabled: false, restore: 'leave' });
-    else if (a === 'on-shadow') submitKill({ enabled: true, mode: 'shadow' });
-    else if (a === 'on-active') submitKill({ enabled: true, mode: 'active' });
+    else if (a === 'on-active') {
+      const word = $('#active-word');
+      if (word && word.value !== 'ACTIVE') { toast('Type ACTIVE to confirm', 'error'); return; }
+      const list = $('[data-testid=readiness]');
+      if (list && list.dataset.ready !== 'yes') { toast('Active stays off until every check passes', 'error'); return; }
+      submitKill({ enabled: true, mode: 'active' });
+    }
   });
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'active-word') return;
+    const btn = $('[data-testid=kill-on-active]');
+    const list = $('[data-testid=readiness]');
+    if (btn) btn.disabled = e.target.value !== 'ACTIVE' || !list || list.dataset.ready !== 'yes';
+  });
+  document.addEventListener('close', (e) => {
+    const dlg = e.target;
+    if (dlg && dlg._opener && dlg._opener.focus) dlg._opener.focus();
+  }, true);
 
   // forms that build their API path from a select (users page; no inline handlers)
   document.addEventListener('submit', (e) => {
@@ -223,5 +345,23 @@
     for (const el of document.querySelectorAll('.track > [data-n]')) el.style.flex = el.dataset.n + ' 1 0';
   }
 
-  document.addEventListener('DOMContentLoaded', () => { startLive(); countdown(); labelToggle(); tracks(); });
+  function sheetGesture(dlg) {
+    if (!dlg) return;
+    let y0 = null;
+    dlg.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.sheet-handle')) y0 = e.clientY;
+    });
+    dlg.addEventListener('pointerup', (e) => {
+      if (y0 != null && e.clientY - y0 > 48) dlg.close();
+      y0 = null;
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    startLive(); countdown(); labelToggle(); tracks();
+    sheetGesture($('#stop-sheet'));
+    sheetGesture($('#confirm-sheet'));
+    const stop = $('#kill-open');
+    const sheet = $('#stop-sheet');
+    if (stop && sheet) stop.addEventListener('click', () => { sheet._opener = stop; });
+  });
 })();

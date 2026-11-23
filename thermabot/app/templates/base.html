@@ -1,92 +1,89 @@
 <!doctype html>
-<html lang="en" data-timezone="{{ timezone }}">
+<html lang="en" data-timezone="{{ timezone }}"{% if embed %} class="embed"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="tb-root" content="{{ up }}">
 {% if csrf %}<meta name="csrf-token" content="{{ csrf }}">{% endif %}
 <title>{% block title %}thermabot{% endblock %} · thermabot</title>
-<link rel="icon" type="image/svg+xml" href="{{ asset('brand-mark.svg') }}">
-<link rel="stylesheet" href="{{ asset('vendor/pico.min.css') }}">
-<link rel="stylesheet" href="{{ asset('app.css') }}">
-{% if charts %}<link rel="stylesheet" href="{{ asset('vendor/uplot/uPlot.min.css') }}">
-<script src="{{ asset('vendor/uplot/uPlot.iife.min.js') }}"></script>
-<script src="{{ asset('charts.js') }}"></script>{% endif %}
-<script src="{{ asset('vendor/htmx.min.js') }}"></script>
-<script src="{{ asset('app.js') }}"></script>
+<link rel="icon" type="image/svg+xml" href="{{ up }}{{ asset('brand-mark.svg') }}">
+<link rel="stylesheet" href="{{ up }}{{ asset('vendor/pico.min.css') }}">
+<link rel="stylesheet" href="{{ up }}{{ asset('app.css') }}">
+{% if charts %}<link rel="stylesheet" href="{{ up }}{{ asset('vendor/uplot/uPlot.min.css') }}">
+<script src="{{ up }}{{ asset('vendor/uplot/uPlot.iife.min.js') }}"></script>
+<script src="{{ up }}{{ asset('charts.js') }}"></script>{% endif %}
+<script src="{{ up }}{{ asset('vendor/htmx.min.js') }}"></script>
+<script src="{{ up }}{{ asset('app.js') }}"></script>
 </head>
 <body>
 <a class="skip-link" href="#content">Skip to content</a>
 <main class="container">
 {% if p %}
 <header class="tb" data-testid="header">
-  <div>
-    <a class="brand" href="./"><img class="brand-mark" src="{{ asset('brand-mark.svg') }}"
-      width="36" height="36" alt="">thermabot</a>
-    <span id="state-badge" class="badge" data-testid="state-badge" data-state="{{ eff.state }}"
-          data-label="{{ eff.label }}" title="Effective bot state">{{ eff.label }}</span>
-    {% if weather_stale %}<span class="pill warn" data-testid="weather-pill"
-          title="The weather forecast is missing or stale">Weather stale</span>{% endif %}
-    {% if sensors_missing %}<span class="pill warn" data-testid="sensors-pill"
-          title="No blower/compressor/outdoor sensor is configured (Settings > HVAC sensors)">Sensors not configured</span>{% endif %}
-    {% if override %}<small data-testid="override-countdown"
+  <div class="status-bar" data-testid="status-bar">
+    <a class="brand" href="{{ up or './' }}"><img class="brand-mark" src="{{ up }}{{ asset('brand-mark.svg') }}"
+      width="36" height="36" alt=""><span class="brand-name">thermabot</span></a>
+    <span id="state-badge" class="mode-pill" data-testid="state-badge" data-state="{{ eff.state }}"
+          data-mode="{{ mode.key }}" data-label="{{ eff.label }}"{% if mode.degraded %} data-degraded="{{ mode.degraded }}"{% endif %}>
+      <i class="dot" aria-hidden="true"></i><span class="mode-text">{{ mode.text }}</span></span>
+    <span class="soak wide-only" data-testid="shadow-days">Shadow {{ '%.1f'|format(shadow_days) }} of {{ shadow_min_days }}</span>
+    <span class="health-chip wide-only" data-health="{{ ha_health }}" data-testid="ha-chip"><i class="dot" aria-hidden="true"></i>HA {{ 'down' if ha_health == 'down' else ('ok' if ha_health == 'ok' else ha_health) }}</span>
+    <span class="health-chip wide-only{% if weather_stale %} warn{% endif %}" data-health="{{ 'stale' if weather_stale else 'ok' }}" data-testid="weather-chip"><i class="dot" aria-hidden="true"></i>{% if weather_stale %}Weather stale{% else %}Weather ok{% endif %}</span>
+    {% if weather_stale %}<span class="sr-only" data-testid="weather-pill">Weather stale</span>{% endif %}
+    {% if sensors_missing %}<span class="health-chip warn wide-only" data-testid="sensors-pill">Sensors not configured</span>{% endif %}
+    <span id="live-tag" class="live-tag wide-only" data-testid="live-tag">live</span>
+    {% if override %}<small class="wide-only" data-testid="override-countdown"
           data-expires="{{ override.expires_at.isoformat() }}">Override until
           {{ override.expires_at|localtime }}</small>{% endif %}
-  </div>
-  <div>
-    {% set on = kill == 'on' %}
-    <span id="kill-state" class="kill" data-testid="kill-state" data-on="{{ kill or 'off' }}"
-          data-mode="{{ run_mode or '' }}">{% if not on %}Bot: Stopped{% elif run_mode == 'active'
-          %}Bot: Controlling{% else %}Bot: Watching (Shadow){% endif %}</span>
-    <a class="controls-link" href="./#controls" data-testid="controls-link">Controls</a>
+    {% if p.can('kill_off') and (kill == 'on' or p.can('kill_on')) %}
+    <button type="button" id="kill-open" data-testid="kill-open" class="{{ 'stop' if kill == 'on' else 'resume' }}"
+      data-kill="{{ 'open' if kill == 'on' else 'resume' }}" data-can-start="{{ 1 if p.can('kill_on') else 0 }}">{{ 'Stop' if kill == 'on' else 'Resume' }}</button>
+    {% endif %}
     <button type="button" class="icon-btn" data-theme-toggle data-testid="theme-toggle"
       aria-label="Switch light/dark mode" title="Switch light/dark mode">◐</button>
+    <details class="account-menu" data-testid="account-menu">
+      <summary aria-label="Account menu">{{ p.username }}</summary>
+      <div>
+        <small data-testid="user">{{ p.username }} ({{ p.role }})</small>
+        <a href="{{ up }}account">Account</a>
+        <button type="button" class="secondary outline" data-api="POST logout" data-done="Logged out"
+            data-reload data-testid="logout">Log out</button>
+      </div>
+    </details>
   </div>
-  {# 4 primary tabs + 'More'; a bottom tab bar under 600 px, a top nav above #}
-  {% set primary = ['/', '/plan', '/room', '/history'] %}
-  {% set icons = {'/': '⌂', '/plan': '◷', '/room': '▣', '/history': '▤'} %}
-  {% set more = nav|rejectattr(0, 'in', primary)|list %}
   <nav data-testid="nav" class="tabs" aria-label="Main"><ul>
-    {% for href, label in nav if href in primary %}<li><a href="{{ href|rel }}"{% if href == path %} aria-current="page"{% endif %}><span class="ico" aria-hidden="true">{{ icons[href] }}</span>{{ 'Home' if href == '/' else label }}</a></li>{% endfor %}
-    <li><details class="more" data-testid="nav-more">
-      <summary{% if more|selectattr(0, 'equalto', path)|list %} aria-current="page"{% endif %}><span class="ico" aria-hidden="true">☰</span>More</summary>
-      <ul>
-        {% for href, label in more %}<li><a href="{{ href|rel }}"{% if href == path %} aria-current="page"{% endif %}>{{ label }}</a></li>{% endfor %}
-        <li><small data-testid="user">{{ p.username }} ({{ p.role }})</small></li>
-        <li><button class="secondary outline" data-api="POST logout" data-done="Logged out"
-            data-reload data-testid="logout">Log out</button></li>
-      </ul>
-    </details></li>
+    {% for href, label, sec in nav %}<li><a href="{{ up }}{{ href|rel }}"{% if sec == section %} aria-current="page"{% endif %} aria-label="{{ label }}"><span class="ico" aria-hidden="true">{{ icons[href] }}</span><span class="lbl">{{ label }}</span></a></li>{% endfor %}
   </ul></nav>
 </header>
+<p id="live-status" class="sr-only" aria-live="polite"></p>
 {% if p.can('kill_off') %}
-<dialog id="kill-dialog" data-testid="kill-dialog" aria-labelledby="kill-off-title"><article>
-  <div id="kill-off">
-    <h3 id="kill-off-title">Stop the bot</h3>
-    <p>The bot stops changing the thermostat. The thermostat keeps its current settings until
-      someone starts the bot again.</p>
-    <p id="kill-off-warning" class="banner">The thermostat is currently <strong>off</strong>.
-      Stopping the bot now would leave the house unconditioned.</p>
-    <div id="kill-restore-choices">
-      <button data-kill="off-band" data-testid="kill-off-band">Restore the Home band, then
-        stop</button>
-      <button class="secondary" data-kill="off-leave" data-testid="kill-off-leave">Leave it off
-        and stop</button>
-    </div>
-    <button class="stop" data-kill="off-leave" data-testid="kill-off">Stop bot</button>
+<dialog id="stop-sheet" class="sheet" data-testid="stop-sheet" aria-labelledby="stop-title"><article>
+  <div class="sheet-handle" aria-hidden="true"></div>
+  <h3 id="stop-title">Stop</h3>
+  <p>The bot stops changing the thermostat. The thermostat keeps its current settings.</p>
+  <p id="stop-keeps" data-testid="stop-keeps"></p>
+  <p id="kill-off-warning" class="banner" hidden>The thermostat is currently <strong>off</strong>.
+    Stopping now would leave the house unconditioned.</p>
+  <div id="kill-restore-choices" hidden>
+    <button type="button" data-kill="off-band" data-testid="kill-off-band">Restore the Home band, then stop</button>
+    <button type="button" class="secondary" data-kill="off-leave" data-testid="kill-off-leave">Leave it off and stop</button>
   </div>
-  <div id="kill-on">
-    <h3 id="kill-on-title">Start the bot</h3>
-    {% if p.can('kill_on') %}
-    <button class="start" data-kill="on-shadow" data-testid="kill-on-shadow">Start: watch only
-      (Shadow)</button>
-    {% if p.can('set_active') %}<button class="contrast" data-kill="on-active"
-      data-testid="kill-on-active">Start: control the thermostat (Active)</button>{% endif %}
-    {% else %}<p>Only an Owner can start the bot.</p>{% endif %}
-  </div>
-  <footer><button class="secondary" data-kill="cancel">Cancel</button></footer>
+  <button type="button" class="stop" data-kill="off-leave" data-testid="kill-off">Stop</button>
+  <footer><button type="button" class="secondary" data-kill="cancel">Cancel</button></footer>
 </article></dialog>
 {% endif %}
+<dialog id="confirm-sheet" class="sheet" data-testid="confirm-sheet" aria-labelledby="confirm-title"><article>
+  <div class="sheet-handle" aria-hidden="true"></div>
+  <h3 id="confirm-title">Confirm</h3>
+  <p id="confirm-body"></p>
+  <label id="confirm-typed-label" hidden>Type <strong id="confirm-typed-word"></strong> to confirm
+    <input id="confirm-typed" data-testid="confirm-typed" autocomplete="off"></label>
+  <footer>
+    <button type="button" id="confirm-yes" data-testid="confirm-yes">Confirm</button>
+    <button type="button" class="secondary" id="confirm-no">Cancel</button>
+  </footer>
+</article></dialog>
 {% endif %}
 <div id="toast" role="status" data-testid="toast" hidden></div>
 {% if p %}<p id="ha-connection-warning" class="banner" role="status"{% if ha_health != 'down' %} hidden{% endif %}>

@@ -1,0 +1,21 @@
+<section id="home-rooms" class="card" data-testid="rooms-card">
+  <h3>Rooms</h3>
+  <div class="room-tiles">
+  {% for r in rooms %}{% set room_cfg = settings.rooms.get(r.key) %}
+  <a class="room-tile{% if r.stale %} stale{% endif %}" href="{{ up }}room?room={{ r.key }}" data-room="{{ r.key }}" data-floor="{{ room_cfg.floor if room_cfg else '' }}" data-testid="room-{{ r.key }}">
+    {% if room_cfg and room_cfg.floor %}<small>{{ room_cfg.floor }}</small>{% endif %}
+    <strong>{{ r.key }}</strong>
+    {% if r.stale %}<span class="tag warn">Stale {{ '%.0f'|format(r.age_min) if r.age_min is not none else '' }} min</span>
+    {% else %}<span class="room-temp">{{ r.temp|temp(units) }}{% if r.estimated %} est{% endif %}</span>{% endif %}
+  </a>
+  {% else %}<p class="meta">No room data yet.</p>{% endfor %}
+  </div>
+  <table data-testid="rooms" class="cards sr-table"><thead><tr><th>Floor / room</th><th>Temperature</th><th>Age</th><th>Score</th></tr></thead><tbody>
+  {% for r in rooms %}{% set room_cfg = settings.rooms.get(r.key) %}<tr data-room="{{ r.key }}" data-floor="{{ room_cfg.floor if room_cfg else '' }}"><td>
+    {% if room_cfg and room_cfg.floor %}<small>{{ room_cfg.floor }}</small><br>{% endif %}{{ r.key }}</td>
+    <td data-label="Temperature">{% if r.stale %}hidden (stale){% else %}{{ r.temp|temp(units) }}{% if r.estimated %} (est){% endif %}{% endif %}</td>
+    <td data-label="Age">{% if r.stale %}Stale {{ '%.0f'|format(r.age_min) if r.age_min is not none else '' }} min{% else %}{{ '%.0f min'|format(r.age_min) if r.age_min is not none else '—' }}{% endif %}</td>
+    <td data-label="Score">{{ '%.0f'|format(r.score) if r.score is not none else '—' }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</section>
