@@ -1,0 +1,14 @@
+<section id="home-timeline" class="card" data-testid="timeline">
+  <p class="label">Next 24 hours</p>
+  {% if timeline_svg %}
+  <figure>
+    {{ timeline_svg|safe }}
+    <figcaption class="meta">{{ timeline_summary }}</figcaption>
+  </figure>
+  <details class="fallback"><summary>Show as a table</summary>
+    <table class="cards" data-testid="timeline-table"><thead><tr><th>#</th><th>Time</th><th>Step</th></tr></thead><tbody>
+    {% for n, t, text in timeline_rows %}<tr><td>{{ n }}</td><td>{{ t }}</td><td>{{ text }}</td></tr>{% endfor %}
+    </tbody></table>
+  </details>
+  {% else %}<p class="meta">No plan yet. {{ plan_eta }}</p>{% endif %}
+</section>

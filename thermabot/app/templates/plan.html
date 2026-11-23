@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Plan{% endblock %}
 {% block content %}
-<div class="page-head"><h2>Plan &amp; Timeline</h2>
-{% if plan %}<p>Created {{ plan.created_at|localtime }} &middot; {{ plan.steps|length }} steps</p>{% endif %}</div>
+<div class="page-head"><h2>Plan</h2>
+{% if plan %}<p class="meta">Created {{ plan.created_at|localtime }} · {{ plan.steps|length }} steps</p>{% endif %}</div>
 {% if not plan %}<p class="empty" data-testid="no-plan">No plan yet. The first replan runs at start-up.</p>
 {% else %}
 {% if plan.kind == 'fallback' %}<p class="banner" data-testid="fallback-banner">Fallback plan:
   {{ plan.reason_banner or 'the optimiser could not produce a plan; following the schedule bands.' }}</p>
-{% elif plan.reason_banner %}<p><small>{{ plan.reason_banner }}</small></p>{% endif %}
+{% elif plan.reason_banner %}<p class="meta">{{ plan.reason_banner }}</p>{% endif %}
 <section class="card">
 <figure class="chart-card">
   <div id="chart" class="chart" data-chart="plan" data-src="plan-data" data-testid="chart" role="img"
@@ -23,12 +23,15 @@
   data-testid="block" data-block="{{ b.block }}" data-start="{{ b.t.isoformat() }}" data-n="{{ b.n }}"
   title="{{ b.t|localtime }} {{ b.block }}"></div>{% endfor %}</div>
 </section>
-<section class="card"><h3>Changes</h3>
-<table data-testid="changes" class="cards"><thead><tr><th>Time</th><th>Action</th><th>Reason</th></tr></thead><tbody>
-{% for s in changes %}<tr data-testid="change" data-start="{{ s.t.isoformat() }}"><td>{{ s.t|localtime }}</td>
-  <td data-label="Action">{{ s.hvac_mode }}{% if s.heat_sp is not none %} heat {{ s.heat_sp }}{% endif %}{% if s.cool_sp is not none %} cool {{ s.cool_sp }}{% endif %}{% if s.fan_mode == 'on' %} fan on{% endif %}</td>
-  <td data-label="Reason">{{ s.reason or '-' }}</td></tr>{% endfor %}
-</tbody></table>
+<section class="card"><h3>Recommendations</h3>
+<ol class="plan-steps" data-testid="changes">
+{% for n, i, sentence, s in numbered %}<li data-testid="change" data-start="{{ s.t.isoformat() }}">
+  <span class="mark">{{ n }}</span>
+  <div><strong>{{ s.t|localtime }}</strong> {{ sentence }}
+    <p class="meta">{{ s.reason or '—' }}</p>
+    <a href="{{ up }}plan/{{ i }}/why">Why this?</a></div>
+</li>{% endfor %}
+</ol>
 </section>
 {% endif %}
 {% endblock %}

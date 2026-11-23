@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Forecast{% endblock %}
 {% block content %}
-<div class="page-head"><h2>Forecast &amp; 48 h plan</h2>
+{% include "partials/insights_tabs.html" %}
+<div class="page-head"><h2>Forecast</h2>
 <p data-testid="forecast-source">Provider <strong>{{ 'NWS' if d.provider == 'nws' else 'Open-Meteo' }}</strong>{% if d.source and d.source != d.provider %} (last forecast from {{ d.source }}){% endif %}{% if d.fetched_at %} &middot; fetched {{ d.fetched_at|localtime }}{% endif %} &middot; {{ hours|length }} hours &middot; &deg;{{ units }}</p></div>
 {% if proj.fallback %}<p class="banner" data-testid="fallback-banner">{{ proj.banner or 'Fallback plan' }}{% if not proj.model_fitted %}: the thermal model has not been fitted yet, so the plan follows the schedule bands (or the thermostat's own setpoints) and the indoor/runtime estimates use default model values.{% endif %}</p>{% endif %}
 {% if d.stale %}<p class="banner" data-testid="weather-stale">Weather forecast missing or stale{% if d.fetched_at %} (fetched {{ d.fetched_at|localtime }}){% endif %}.</p>{% endif %}

@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Efficiency{% endblock %}
 {% block content %}
+{% include "partials/insights_tabs.html" %}
 <div class="page-head"><h2>Efficiency</h2>
-<p data-testid="eff-summary">Runtime per degree-day (base {{ r.base_f|num }} &deg;F) vs mean outdoor temperature &middot; {{ r.days }} days recorded &middot; a day counts with &gt; {{ r.min_dd|num }} degree-days and &ge; {{ r.min_coverage_pct|num }}% of its minutes sampled.</p></div>
+<p data-testid="eff-tile">Efficiency: {{ r.tile.text }}</p>
+<p data-testid="eff-summary">Runtime per degree-day (base {{ r.base_f|temp(units) }}) vs mean outdoor temperature · {{ r.days }} days recorded · a day counts with &gt; {{ r.min_dd|num }} degree-days and ≥ {{ r.min_coverage_pct|num }}% of its minutes sampled.</p></div>
 <div class="grid-2">
 {% for key in ['heat', 'cool'] %}{% set c = r[key] %}{% set ch = charts_eff[key] %}
 <section class="card eff" data-testid="eff-{{ key }}">
@@ -17,8 +19,8 @@
       {% if c.fit %}&middot; <span data-testid="eff-fit-stats">{{ c.fit.kind }} fit, n={{ c.fit.n }}, R&sup2;={{ '%.2f'|format(c.fit.r2) }}</span>, <i class="band"></i>95% band{% if c.fit.downweighted %}, {{ c.fit.downweighted }} outlier(s) down-weighted{% endif %}{% endif %}</figcaption>
   </figure>
   <details class="fallback"><summary>Show as a table</summary>
-    <table class="cards" data-testid="eff-table-{{ key }}"><thead><tr><th>Day</th><th>Mean outdoor °F</th><th>min / degree-day</th></tr></thead><tbody>
-    {% for pt in c.points|reverse %}<tr data-testid="eff-point"><td>{{ pt.day }}</td><td data-label="Mean outdoor °F">{{ '%.1f'|format(pt.x) }}</td><td data-label="min / DD">{{ '%.1f'|format(pt.y) }}</td></tr>{% endfor %}
+    <table class="cards" data-testid="eff-table-{{ key }}"><thead><tr><th>Day</th><th>Mean outdoor</th><th>min / degree-day</th></tr></thead><tbody>
+    {% for pt in c.points|reverse %}<tr data-testid="eff-point"><td>{{ pt.day }}</td><td data-label="Mean outdoor">{{ pt.x|temp(units) }}</td><td data-label="min / DD">{{ '%.1f'|format(pt.y) }}</td></tr>{% endfor %}
     </tbody></table>
   </details>
   {% endif %}

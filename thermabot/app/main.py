@@ -38,6 +38,7 @@ from thermabot.app.loops import HEARTBEAT_ENTITY, TICK_S, Jobs, Loops, slot_stor
 from thermabot.app.routes_api import Ctx, _kv_put, load_settings
 from thermabot.app.routes_ui import SUMMARY_KEY
 from thermabot.config import Env, Settings
+from thermabot.core import explain as explain_plan
 from thermabot.core import openings as opening_policy
 from thermabot.core import planner, shadow, thermal
 from thermabot.core import statemachine as sm
@@ -466,6 +467,19 @@ class Runtime:
                 indoor_f=None if snap is None else snap.thermostat.current_temp,
                 supported_modes=[] if snap is None else list(snap.thermostat.hvac_modes),
             )
+        try:
+            persisted = db.read_bot_state(self.conn)
+            label = f"thermal model v{version}" if version else "thermal model not fitted"
+            p = explain_plan.attach(
+                p,
+                self.controller.guard_context(self.ctx.snapshot, now, self.ctx.live, persisted),
+                entity_id=self.controller.entity,
+                forecast=fc,
+                house=house.value,
+                model_label=label,
+            )
+        except Exception:  # noqa: BLE001 - a missing explanation never drops the plan
+            log.exception("plan explanation failed")
         self.ctx.plan = p
         self.catch_up(now, version)
         try:

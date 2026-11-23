@@ -1,0 +1,9 @@
+<nav class="seg settings-nav" aria-label="Settings" data-testid="settings-nav"><ul>
+  {% for key, title in tasks %}
+  <li><a href="{{ up }}{{ 'settings' if key == 'comfort' else 'settings/' + key }}"{% if task == key or (task == 'comfort' and key == 'comfort') %} aria-current="page"{% endif %}>{{ title }}</a></li>
+  {% endfor %}
+  {% if p.can('edit_safety') %}<li><a href="{{ up }}recovery" data-testid="recovery-link">Backup</a></li>
+  <li><a href="{{ up }}health">Health</a></li>{% endif %}
+  <li><a href="{{ up }}account">Account</a></li>
+  {% if p.can('manage_users') %}<li><a href="{{ up }}users">Users</a></li>{% endif %}
+</ul></nav>

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import cache
 from hashlib import sha256
 from pathlib import Path
@@ -22,27 +22,39 @@ from fastapi.templating import Jinja2Templates
 
 from thermabot import __version__
 from thermabot.adapters import db
-from thermabot.app import forms
+from thermabot.app import forms, timeline
 from thermabot.app import routes_api as api
 from thermabot.app.auth import COOKIE, FIRST_RUN_COOKIE, FIRST_RUN_TTL, MIN_PW, Principal, require
+from thermabot.app.present import action_sentence
 from thermabot.app.routes_api import Ctx, ctx_of, load_settings
+from thermabot.app.units import Units, format_temp
+from thermabot.core import explain as explain_plan
 from thermabot.core import statemachine as sm
+from thermabot.core.explain import GUARD_LABELS, coldest_room, infer_factors
+from thermabot.core.guards import evaluate
 from thermabot.core.overrides import nudge_active, nudges_today
 from thermabot.core.schedule import active_zone, block_at
+from thermabot.core.types import PlanStep
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
 
-# (href, label, cap) in header order; links are shown only when the user holds the cap.
+# (href, label, cap) — every signed-in page the layout tests visit. The tab bar is TABS.
 NAV = [
-    ("/", "Dashboard", "view"),
+    ("/", "Home", "view"),
     ("/plan", "Plan", "view"),
     ("/room", "My Room", "view"),
+    ("/insights", "Insights", "view"),
     ("/history", "History", "view"),
     ("/forecast", "Forecast", "view"),
     ("/efficiency", "Efficiency", "view"),
     ("/shadow", "Shadow report", "view"),
     ("/settings", "Settings", "edit_comfort"),
+    ("/settings/schedule", "Schedule", "edit_comfort"),
+    ("/settings/safety", "Safety & control", "edit_safety"),
+    ("/settings/ha", "Home Assistant", "edit_safety"),
+    ("/settings/people", "People & rooms", "edit_comfort"),
+    ("/settings/advanced", "Advanced", "edit_comfort"),
     ("/recovery", "Backup & recovery", "edit_safety"),
     ("/setup", "Setup wizard", "edit_safety"),
     ("/model", "Model", "view_model"),
@@ -50,6 +62,16 @@ NAV = [
     ("/users", "Users", "manage_users"),
     ("/account", "Account", "view"),
 ]
+
+# (href, label, cap, section). A member only sees Home and Insights.
+TABS = [
+    ("/", "Home", "view", "home"),
+    ("/plan", "Plan", "view", "plan"),
+    ("/insights", "Insights", "view", "insights"),
+    ("/settings", "Settings", "edit_comfort", "settings"),
+]
+INSIGHT_PATHS = {"/insights", "/history", "/forecast", "/efficiency", "/shadow", "/model"}
+TAB_ICONS = {"/": "⌂", "/plan": "◷", "/insights": "▤", "/settings": "⚙"}
 
 
 def localtime(t: datetime | str | None, fmt: str = "%a %H:%M") -> str:
@@ -60,10 +82,25 @@ def localtime(t: datetime | str | None, fmt: str = "%a %H:%M") -> str:
     return t.astimezone(active_zone()).strftime(fmt)
 
 
+def _temp(value: object, units: str = "F", delta: bool = False) -> str:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "—"
+    unit: Units = "C" if units == "C" else "F"
+    return format_temp(float(value), unit, delta=delta)
+
+
+def _temp_num(value: object, units: str = "F") -> str:
+    """The display number only, for inputs that must not include the unit suffix."""
+    text = _temp(value, units)
+    return text[:-2] if text.endswith(("°F", "°C")) else text
+
+
 templates.env.filters["localtime"] = localtime
 templates.env.filters["num"] = lambda x: "—" if x is None else f"{x:g}"
-# v0.3.0 ingress: every page lives at the top level, so links are written relative
-# ('/plan' -> 'plan', '/' -> './') and resolve under any root path (HA ingress, a proxy).
+templates.env.filters["temp"] = _temp
+templates.env.filters["tempnum"] = _temp_num
+# v0.3.0 ingress: links are relative ('/plan' -> 'plan', '/' -> './'). Nested pages prefix
+# them with `up` (`../`) so they still resolve under any root path.
 templates.env.filters["rel"] = lambda h: h.lstrip("/") or "./"
 
 
@@ -100,22 +137,58 @@ CtxD = Annotated[Ctx, Depends(ctx_of)]
 router = APIRouter(include_in_schema=False)
 
 
+def _path_of(request: Request) -> str:
+    return request.url.path.removeprefix(request.scope.get("root_path", "")) or "/"
+
+
+def _tabs(p: Principal | None) -> list[tuple[str, str, str]]:
+    if p is None:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for href, label, cap, section in TABS:
+        if not p.can(cap):
+            continue
+        if p.role == "member" and section not in ("home", "insights"):
+            continue
+        out.append((href, label, section))
+    return out
+
+
+def _section(path: str) -> str:
+    if path in INSIGHT_PATHS:
+        return "insights"
+    if path == "/plan" or path.startswith("/plan/"):
+        return "plan"
+    settings_paths = {"/recovery", "/setup", "/health", "/users", "/account"}
+    if path.startswith("/settings") or path in settings_paths:
+        return "settings"
+    return "home"
+
+
 def render(
     request: Request, c: Ctx, p: Principal | None, name: str, charts: bool = False, **kw: Any
 ) -> HTMLResponse:
     st = db.read_bot_state(c.conn)
     cur = load_settings(c)
     saved = cur.thermostat.entity_id
+    eff = c.eff()
+    path = _path_of(request)
+    depth = 0 if path == "/" else path.strip("/").count("/")
+    embed = request.query_params.get("embed") == "1" or request.cookies.get("tb_embed") == "1"
+    mode = _mode_view(eff, st.kill_switch if st else None, st.run_mode if st else None)
     ctx: dict[str, Any] = {
         "p": p,
         "version": __version__,
         "csrf": p.csrf if p else None,
-        "eff": c.eff(),
+        "eff": eff,
         "override": c.open_override(),
         "kill": st.kill_switch if st else None,
         "run_mode": st.run_mode if st else None,
-        "nav": [(h, lbl) for h, lbl, cap in NAV if p and p.can(cap)],
-        "path": request.url.path.removeprefix(request.scope.get("root_path", "")) or "/",
+        "nav": _tabs(p),
+        "icons": TAB_ICONS,
+        "section": _section(path),
+        "path": path,
+        "up": "../" * depth,
         "charts": charts,
         "now": c.clock(),
         "timezone": active_zone().key,
@@ -125,11 +198,40 @@ def render(
         "saved_entity": saved,
         "running_entity": c.running_entity,
         "weather_stale": p is not None and c.weather_health != "ok",
+        "weather_health": c.weather_health,
         "ha_health": c.ha_health,
         "sensors_missing": p is not None and cur.sensors_missing,  # v0.6.1
+        "units": cur.display.units,
+        "shadow_days": sm.shadow_days(st, c.clock()) if st else 0.0,
+        "shadow_min_days": sm.SHADOW_MIN_DAYS,
+        "mode": mode,
+        "embed": embed,
+        "guest_on": bool((_kv(c, "guest") or {}).get("on")),
         **kw,
     }
-    return templates.TemplateResponse(request, name, ctx)
+    response = templates.TemplateResponse(request, name, ctx)
+    if request.query_params.get("embed") == "1":
+        response.set_cookie(
+            "tb_embed",
+            "1",
+            httponly=False,
+            samesite="lax",
+            path=request.scope.get("root_path") or "/",
+        )
+    return response
+
+
+def _mode_view(eff: sm.EffectiveState, kill: str | None, run_mode: str | None) -> dict[str, str]:
+    if eff.label == "SETUP NEEDED":
+        return {"key": "setup", "text": "Setup needed", "degraded": ""}
+    if kill != "on" or eff.base == "DISABLED":
+        return {"key": "stopped", "text": "Stopped", "degraded": ""}
+    text = "Active" if (run_mode == "active" or eff.base == "ACTIVE") else "Shadow"
+    return {
+        "key": "active" if text == "Active" else "shadow",
+        "text": text,
+        "degraded": eff.degraded_reason or "",
+    }
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -182,42 +284,137 @@ def _kv(c: Ctx, key: str) -> Any:
     return None if r is None else json.loads(r["value_json"])
 
 
+def _model_label(c: Ctx) -> str:
+    row = c.conn.execute(
+        "SELECT version, mae_json FROM models WHERE active=1 ORDER BY version DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return "not fitted"
+    mae = json.loads(row["mae_json"]).get("thermostat")
+    err = f", error {mae:.2f}" if isinstance(mae, int | float) else ""
+    return f"v{row['version']}{err}"
+
+
+def _house_label(c: Ctx) -> str:
+    pres = c.snapshot.presence if c.snapshot else None
+    if pres is None:
+        return "occupied"
+    return pres.house.value.lower()
+
+
+def _explained(c: Ctx, step: PlanStep) -> PlanStep:
+    if step.checks and step.factors:
+        return step
+    s = load_settings(c)
+    now = c.clock()
+    st = db.read_bot_state(c.conn)
+    snap = c.snapshot
+    dev_min = snap.thermostat.min_temp if snap and snap.thermostat.min_temp is not None else 50.0
+    dev_max = snap.thermostat.max_temp if snap and snap.thermostat.max_temp is not None else 90.0
+    from thermabot.core.guards import GuardCtx
+
+    ctx = GuardCtx(
+        kill_switch=None if st is None else st.kill_switch,
+        ha_mirror=c.live.ha_mirror,
+        run_mode="shadow" if st is None else st.run_mode,
+        override_open=c.open_override() is not None,
+        snapshot=snap,
+        settings=s,
+        now=now,
+        device_min_f=dev_min,
+        device_max_f=dev_max,
+    )
+    block = block_at(s.schedule, step.t)
+    factors = infer_factors(
+        step,
+        block=block,
+        forecast=c.forecast,
+        house=_house_label(c),
+        model_label=_model_label(c),
+        now=now,
+    )
+    action = explain_plan.action_for(step, s.thermostat.entity_id)
+    return step.model_copy(
+        update={
+            "factors": factors,
+            "decision": evaluate(action, ctx),
+            "checks": explain_plan.guard_chain(action, ctx),
+        }
+    )
+
+
+def _step_view(c: Ctx, step: PlanStep, index: int) -> dict[str, Any]:
+    shown = _explained(c, step)
+    units: Units = load_settings(c).display.units
+    cold = coldest_room(shown)
+    return {
+        "i": index,
+        "step": shown,
+        "sentence": action_sentence(shown, units),
+        "reasons": [f.text for f in shown.factors[:3]],
+        "coldest": None if cold is None else {"room": cold[0], "temp": format_temp(cold[1], units)},
+        "checks": [(GUARD_LABELS.get(ch.guard, ch.guard), ch.ok, ch.note) for ch in shown.checks],
+    }
+
+
+def home_view(c: Ctx, p: Principal) -> dict[str, Any]:
+    now = c.clock()
+    s = load_settings(c)
+    steps = c.plan.steps if c.plan else []
+    nxt_i = next((i for i, step in enumerate(steps) if step.t > now), None)
+    nxt = None if nxt_i is None else _step_view(c, steps[nxt_i], nxt_i)
+    win = timeline.window(steps, now)
+    member = p.role == "member"
+    rooms = list(c.snapshot.rooms.values()) if c.snapshot else []
+    if member and p.room:
+        rooms = [r for r in rooms if r.key == p.room]
+    snap = c.snapshot
+    stale_tstat = False
+    if snap is not None and snap.thermostat.last_reported is not None:
+        stale_tstat = (now - snap.thermostat.last_reported).total_seconds() > 10 * 60
+    elif snap is not None and snap.thermostat.current_temp is None:
+        stale_tstat = False
+    return {
+        "settings": s,
+        "snap": snap,
+        "score": c.score,
+        "rooms": rooms,
+        "next_step": nxt,
+        "next_change": None if nxt is None else nxt["step"].reason or nxt["sentence"],
+        "timeline_svg": timeline.svg(win, s, s.display.units),
+        "timeline_rows": timeline.table_rows(win, s.display.units),
+        "timeline_summary": timeline.summary(win, s.display.units),
+        "opening_assessment": c.opening_assessment if p.can("edit_safety") else [],
+        "member": member,
+        "stale_tstat": stale_tstat,
+        "plan_eta": "The first replan runs at startup." if c.plan is None else "",
+        "eff_tile": _eff_tile(c),
+    }
+
+
+def _eff_tile(c: Ctx) -> str:
+    try:
+        from thermabot.app.efficiency import report
+
+        return str(report(c.conn, c.clock())["tile"]["text"])
+    except Exception:  # noqa: BLE001 - a read-only tile never breaks Home
+        return "collecting data 0/5"
+
+
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request, c: CtxD, p: Annotated[Principal, Depends(page("view"))]
 ) -> Response:
-    now, st = c.clock(), db.read_bot_state(c.conn)
-    s = load_settings(c)
-    nxt = None
-    if c.plan is not None:
-        nxt = next(
-            (f"{localtime(s.t)}: {s.reason}" for s in c.plan.steps if s.t > now and s.reason), None
-        )
-    g = _kv(c, "guest") or {}
-    from thermabot.app.efficiency import report as eff_report
+    return render(request, c, p, "dashboard.html", **home_view(c, p))
 
-    try:
-        eff_tile = eff_report(c.conn, now)["tile"]
-    except Exception:  # noqa: BLE001 - a read-only tile never breaks the dashboard
-        eff_tile = None
-    return render(
-        request,
-        c,
-        p,
-        "dashboard.html",
-        eff_tile=eff_tile,
-        snap=c.snapshot,
-        score=c.score,
-        rooms=list(c.snapshot.rooms.values()) if c.snapshot else [],
-        next_change=nxt,
-        shadow_days=sm.shadow_days(st, now) if st else 0.0,
-        shadow_min_days=sm.SHADOW_MIN_DAYS,
-        settings=s,
-        opening_assessment=c.opening_assessment if p.can("edit_safety") else [],
-        guest_on=bool(g.get("on")),
-        charts=True,
-        units=s.display.units,
-    )
+
+@router.get("/partials/{name}", response_class=HTMLResponse)
+async def partial(
+    name: str, request: Request, c: CtxD, p: Annotated[Principal, Depends(page("view"))]
+) -> Response:
+    if name not in {"now", "next", "timeline", "rooms", "quick"}:
+        raise HTTPException(404, "unknown partial")
+    return render(request, c, p, f"partials/{name}.html", up="", **home_view(c, p))
 
 
 @router.get("/plan", response_class=HTMLResponse)
@@ -256,7 +453,18 @@ async def plan_page(
             for k in sorted({k for x in steps for k in x.pred_rooms})
         },
         "estimated": est,
+        "units": s.display.units,
+        "step_s": s.planner.step_min * 60,
     }
+    numbered: list[tuple[int, int, PlanStep]] = []
+    seen: tuple[object, ...] | None = None
+    n = 0
+    for i, step in enumerate(steps):
+        key = (step.hvac_mode, step.heat_sp, step.cool_sp, step.fan_mode)
+        if key != seen:
+            n += 1
+            numbered.append((n, i, step))
+        seen = key
     return render(
         request,
         c,
@@ -267,9 +475,22 @@ async def plan_page(
         bars=bars,
         blocks=blocks,
         changes=changes,
+        numbered=[(n, i, action_sentence(step, s.display.units), step) for n, i, step in numbered],
         total=max(len(steps), 1),
         data=json.dumps(data),
     )
+
+
+@router.get("/plan/{index}/why", response_class=HTMLResponse)
+async def plan_why(
+    index: int, request: Request, c: CtxD, p: Annotated[Principal, Depends(page("view"))]
+) -> Response:
+    steps = c.plan.steps if c.plan else []
+    if index < 0 or index >= len(steps):
+        raise HTTPException(404, "no such plan step")
+    view = _step_view(c, steps[index], index)
+    name = "partials/why.html" if request.headers.get("HX-Request") else "why.html"
+    return render(request, c, p, name, why=view, plan=c.plan)
 
 
 def forecast_chart(hours: list[dict[str, Any]], units: str) -> dict[str, Any]:
@@ -375,23 +596,68 @@ async def efficiency_page(
     )
 
 
+def _settings_ctx(c: Ctx, p: Principal, task: str) -> dict[str, Any]:
+    s = load_settings(c)
+    only = forms.TASKS.get(task)
+    ready = api.readiness_of(c) if task == "safety" else None
+    since = (c.clock() - timedelta(hours=24)).astimezone(UTC).isoformat()
+    recent: list[dict[str, Any]] = []
+    if task == "safety":
+        recent = [
+            dict(r)
+            for r in c.conn.execute(
+                "SELECT ts, outcome, guard, reason FROM writes"
+                " WHERE ts >= ? AND outcome IN ('shadow', 'denied') ORDER BY id DESC LIMIT 40",
+                (since,),
+            )
+        ]
+    return {
+        "settings": s,
+        "settings_json": s.model_dump_json(indent=2),
+        "sections": forms.sections(s, owner=p.can("edit_safety"), only=only),
+        "task": task,
+        "task_title": forms.TASK_TITLES.get(task, "Settings"),
+        "tasks": [
+            (key, forms.TASK_TITLES[key])
+            for key in ("comfort", "schedule", "safety", "ha", "people", "advanced")
+            if key != "safety" or p.can("edit_safety")
+        ],
+        "readiness": ready,
+        "recent_decisions": recent,
+    }
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request, c: CtxD, p: Annotated[Principal, Depends(page("edit_comfort"))]
 ) -> Response:
-    """P3 (v0.3.0): forms per section, saved via PUT /api/settings (errors shown per field).
-    The Owner also gets a read-only JSON view under 'Advanced'."""
-    s = load_settings(c)
-    return render(
-        request,
-        c,
-        p,
-        "settings.html",
-        settings=s,
-        settings_json=s.model_dump_json(indent=2),
-        sections=forms.sections(s, owner=p.can("edit_safety")),
-        units=s.display.units,
-    )
+    """Comfort is the settings home. Other tasks are linked from here."""
+    return render(request, c, p, "settings.html", **_settings_ctx(c, p, "comfort"))
+
+
+@router.get("/settings/{task}", response_class=HTMLResponse)
+async def settings_task(
+    task: str, request: Request, c: CtxD, p: Annotated[Principal, Depends(page("edit_comfort"))]
+) -> Response:
+    if task == "schedule":
+        s = load_settings(c)
+        kw = _settings_ctx(c, p, "comfort")
+        kw["task"] = "schedule"
+        kw["task_title"] = "Schedule"
+        return render(request, c, p, "schedule.html", **kw, schedule=s.schedule, bands=s.bands)
+    if task not in forms.TASKS:
+        raise HTTPException(404, "unknown settings page")
+    if task == "safety" and not p.can("edit_safety"):
+        raise HTTPException(403, "needs edit_safety")
+    name = "safety.html" if task == "safety" else "settings.html"
+    return render(request, c, p, name, **_settings_ctx(c, p, task))
+
+
+@router.get("/insights", response_class=HTMLResponse)
+async def insights_page(
+    request: Request, c: CtxD, p: Annotated[Principal, Depends(page("view"))]
+) -> Response:
+    return await history_page(request, c, p)
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -437,7 +703,7 @@ async def history_page(
         c,
         p,
         "history.html",
-        charts=bool(rows),
+        charts=True,
         rows=rows,
         days=days,
         savings=c.savings(),

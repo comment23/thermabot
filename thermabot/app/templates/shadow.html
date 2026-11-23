@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Shadow report{% endblock %}
 {% block content %}
-<div class="page-head"><h2>Shadow report</h2></div>
+{% include "partials/insights_tabs.html" %}
+<div class="page-head"><h2>Shadow</h2></div>
 {% set m = r.model %}
 <section class="hero" data-state="{{ eff.state }}" data-testid="shadow-summary">
   <p data-testid="verdict"><strong>{{ r.verdict }}</strong></p>
@@ -11,7 +12,7 @@
     <div><dt>Saved 7 d</dt><dd data-testid="week-saved">{{ ('%.0f'|format(r.week.saved_pct)) ~ '%' if r.week.saved_pct is not none else '-' }}</dd></div>
   </dl>
   <p><small data-testid="learning-since">{% if r.samples.first %}Learning since {{ r.samples.first|localtime('%a %b %d %H:%M') }}{% else %}No samples yet: the bot records one per minute.{% endif %}</small></p>
-  <p><small data-testid="model-line">{% if m.status == 'fitted' %}Thermal model v{{ m.version }} fitted {{ m.fitted_at|localtime('%b %d %H:%M') }}{% if m.mae is not none %}, holdout MAE {{ '%.2f'|format(m.mae) }}°F{% endif %}.
+  <p><small data-testid="model-line">{% if m.status == 'fitted' %}Thermal model v{{ m.version }} fitted {{ m.fitted_at|localtime('%b %d %H:%M') }}{% if m.mae is not none %}, holdout MAE {{ m.mae|temp(units) }}{% endif %}.
     {% elif m.status == 'learning' %}Learning: {{ m.steps }} of {{ m.need }} 15-minute steps collected; the first model fit is tried once there are enough.
     {% else %}No thermal model yet; the bot holds the thermostat's current setpoints.{% endif %}</small></p>
 </section>

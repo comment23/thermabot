@@ -4,7 +4,8 @@
 <div class="page-head"><h2>Setup wizard</h2></div>
 <p class="card"><small>Reads Home Assistant only; nothing is written to Home Assistant and nothing is saved
 until the last step. Secrets (<code>HA_URL</code>, <code>HA_TOKEN</code>) stay in the
-environment. Saving never changes the run mode or starts/stops the bot.</small></p>
+environment. Saving never changes the run mode or starts Active control.</small></p>
+<p class="meta" data-testid="setup-rail-summary">Setup never starts Active control.</p>
 <div id="setup" data-testid="setup" data-settings='{{ settings_json }}' data-running="{{ running_entity or '' }}">
   <ol class="steps" data-testid="setup-steps">
     <li data-step="1">Connect</li><li data-step="2">Thermostat</li><li data-step="3">Sensors</li>
@@ -77,7 +78,7 @@ environment. Saving never changes the run mode or starts/stops the bot.</small><
   <section data-step="5" data-testid="step-comfort" hidden>
     <h3>5. Comfort bands</h3>
     <label>Display units
-      <select data-testid="units" name="units"><option value="F">°F</option><option value="C">°C</option></select></label>
+      <select data-testid="units" name="units"><option value="F">Fahrenheit</option><option value="C">Celsius</option></select></label>
     <p><small>Low/high per block and season. Rules: heat high ≤ cool low, and cool high − heat
       low ≥ <span data-testid="deadband"></span>.</small></p>
     <p data-testid="seasonal-notice" hidden><small>Weather-aware comfort is enabled: its home and

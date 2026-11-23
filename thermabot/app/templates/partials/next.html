@@ -1,0 +1,14 @@
+<section id="home-next" class="card" data-testid="next">
+  <p class="label">Next recommendation</p>
+  {% if next_step %}
+  <p class="next-sentence" data-testid="next-change">{{ next_step.sentence }}{% if next_step.step.reason %} — {{ next_step.step.reason }}{% endif %}</p>
+  <ul class="reasons">{% for reason in next_step.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+  {% if run_mode != 'active' or kill != 'on' %}<p class="tag shadow" data-testid="not-sent"><i class="dot" aria-hidden="true"></i>Shadow · not sent</p>{% endif %}
+  <p class="actions"><a href="{{ up }}plan/{{ next_step.i }}/why" data-testid="why-link">Why this?</a>
+    <a href="{{ up }}plan">See the plan</a></p>
+  {% else %}
+  <p class="meta" data-testid="next-change">No plan yet. {{ plan_eta or 'The first comparison lands at 00:05.' }}</p>
+  {% endif %}
+  <p class="actions"><a href="{{ up }}forecast" data-testid="forecast-link">Forecast</a>
+    <a href="{{ up }}efficiency" data-testid="efficiency-tile">Efficiency: {{ eff_tile }}</a></p>
+</section>

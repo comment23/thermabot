@@ -61,8 +61,8 @@ def test_forecast_phone_from_more_menu(browser: Browser, srv: Srv) -> None:
     _seed(srv)
     pg = _ctx_page(browser, srv, PHONE)
     login(pg, srv, "jordan")  # any role
-    pg.locator("[data-testid=nav-more] summary").click()
-    pg.click("[data-testid=nav-more] a[href='forecast']")
+    pg.click("[data-testid=nav] a[href='insights']")
+    pg.click("[data-testid=insights-tabs] a[href='forecast']")
     pg.wait_for_url("**/forecast")
     _check(pg, srv, PHONE["width"])
     for el in pg.locator(TAP_SEL).all():
@@ -112,7 +112,7 @@ def test_settings_weather_tools(browser: Browser, srv: Srv) -> None:
     """Settings > Weather: HA home location fills lat/lon, test fetch previews, save stores."""
     pg = _ctx_page(browser, srv, DESKTOP)
     login(pg, srv, "ann")  # admin: weather is not an Owner section
-    pg.goto(f"{srv.url}/settings")
+    pg.goto(f"{srv.url}/settings/ha")
     sec = pg.locator("[data-testid=section-weather]")
     sec.locator("summary").click()
     expect(pg.locator("#f-weather-provider")).to_have_value("nws")  # legacy house row
@@ -129,7 +129,7 @@ def test_settings_weather_tools(browser: Browser, srv: Srv) -> None:
     st = srv.ctx.conn.execute("SELECT kill_switch, run_mode FROM bot_state").fetchone()
     assert (st["kill_switch"], st["run_mode"]) == ("on", "shadow")
     pg.wait_for_timeout(1000)  # settings.js reloads 600 ms after a save
-    pg.goto(f"{srv.url}/settings")
+    pg.goto(f"{srv.url}/settings/ha")
     expect(pg.locator("#f-weather-lat")).to_have_value(re.compile(r"^40(\.0)?$"))
     # clearing lat/lon saves null (= HA home location)
     pg.locator("[data-testid=section-weather] summary").click()
@@ -148,7 +148,7 @@ def test_weather_preview_uses_house_timezone(browser: Browser, srv: Srv) -> None
     )
     pg = context.new_page()
     login(pg, srv, "ann")
-    pg.goto(f"{srv.url}/settings")
+    pg.goto(f"{srv.url}/settings/ha")
     sec = pg.locator("[data-testid=section-weather]")
     sec.locator("summary").click()
     pg.fill("#f-weather-lat", "40")

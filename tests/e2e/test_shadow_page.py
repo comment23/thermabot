@@ -34,8 +34,8 @@ def seed(srv: Srv) -> None:
 def test_shadow_page_via_more_on_phone(phone: Page, srv: Srv, user: str) -> None:  # noqa: F811
     seed(srv)
     login(phone, srv, user)
-    phone.locator("[data-testid=nav-more] summary").click()
-    phone.click("[data-testid=nav-more] a[href='shadow']")
+    phone.click("[data-testid=nav] a[href='insights']")
+    phone.click("[data-testid=insights-tabs] a[href='shadow']")
     phone.wait_for_url("**/shadow")
     assert_page_healthy(phone, srv)
     assert phone.evaluate("document.documentElement.scrollWidth") <= W

@@ -37,6 +37,21 @@ def from_display(v: float, units: Units) -> float:
     return c_to_f(v) if units == "C" else v
 
 
+def format_temp(value: float | None, units: Units = "F", *, delta: bool = False) -> str:
+    """A temperature for the UI. Stored values are °F; `delta` is a difference, not a point."""
+    if value is None:
+        return "—"
+    v = float(value)
+    if units == "C":
+        v = round(v * 5 / 9, 1) if delta else f_to_c(v)
+        num = f"{v:.1f}"
+    else:
+        num = f"{v:g}"
+    if delta and v > 0:
+        num = "+" + num
+    return f"{num}°{'C' if units == 'C' else 'F'}"
+
+
 def temperature_scale(unit: str | None) -> Scale | None:
     """'F' or 'C' for a Home Assistant temperature unit, else None (unknown)."""
     if unit is None:

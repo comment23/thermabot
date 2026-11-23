@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Schedule{% endblock %}
+{% block content %}
+<div class="page-head"><h2>Schedule</h2>
+  <p class="meta">Weekday and weekend blocks. Saving uses the same settings update as the rest of the app.</p></div>
+{% include "partials/settings_nav.html" %}
+<form id="settings-form" data-settings-form data-testid="settings-form" data-schedule-editor data-units="{{ units }}"
+      data-settings='{{ settings_json }}' novalidate>
+  <div class="week" data-testid="schedule-editor" role="list" aria-label="Week">
+    {% for day, kind in [('Mon','weekday'),('Tue','weekday'),('Wed','weekday'),('Thu','weekday'),('Fri','weekday'),('Sat','weekend'),('Sun','weekend')] %}
+    <div class="week-row" role="none">
+      <span class="week-day">{{ day }}</span>
+      <div class="week-blocks" role="presentation">
+        {% for block in schedule[kind] %}
+        <button type="button" class="block blk-{{ block.block }}" data-kind="{{ kind }}" data-index="{{ loop.index0 }}"
+          aria-pressed="false">{{ block.block }} {{ block.start }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <fieldset class="block-editor" data-testid="section-schedule">
+    <legend>Selected block</legend>
+    {% for kind in ['weekday', 'weekend'] %}
+      {% for block in schedule[kind] %}
+      <div class="block-fields" data-kind="{{ kind }}" data-index="{{ loop.index0 }}" {% if not (kind == 'weekday' and loop.index0 == 0) %}hidden{% endif %}>
+        <label>Start
+          <input type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" data-path="schedule.{{ kind }}.{{ loop.index0 }}.start" data-kind="text" value="{{ block.start }}" data-testid="block-start"></label>
+        <small class="field-error" data-error-for="schedule.{{ kind }}.{{ loop.index0 }}.start"></small>
+        <label>Type
+          <select data-path="schedule.{{ kind }}.{{ loop.index0 }}.block" data-kind="select" data-testid="block-type">
+            {% for name in ['home', 'sleep', 'away'] %}<option{% if name == block.block %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select></label>
+      </div>
+      {% endfor %}
+    {% endfor %}
+  </fieldset>
+  <fieldset class="band-sliders" data-testid="section-bands">
+    <legend>Heat and cool bands</legend>
+    {% for season in ['heat', 'cool'] %}
+      {% for name in ['home', 'sleep', 'away'] %}
+        {% set pair = settings.bands[season][name] %}
+        <label>{{ season }} {{ name }} low
+          <input type="range" min="{{ 50|tempnum(units) }}" max="{{ 90|tempnum(units) }}" step="{{ 0.5 if units == 'F' else 0.1 }}"
+            data-path="bands.{{ season }}.{{ name }}.0" data-kind="temp"
+            data-f="{{ pair[0] }}" value="{{ pair[0]|tempnum(units) }}"></label>
+        <label>{{ season }} {{ name }} high
+          <input type="range" min="{{ 50|tempnum(units) }}" max="{{ 90|tempnum(units) }}" step="{{ 0.5 if units == 'F' else 0.1 }}"
+            data-path="bands.{{ season }}.{{ name }}.1" data-kind="temp"
+            data-f="{{ pair[1] }}" value="{{ pair[1]|tempnum(units) }}"></label>
+      {% endfor %}
+    {% endfor %}
+  </fieldset>
+  <p class="meta" data-testid="schedule-preview">Move a block to preview runtime.</p>
+  <button type="button" class="secondary outline" data-testid="schedule-preview-btn">Preview runtime</button>
+  <p class="errors" data-testid="errors"></p>
+  <button type="submit" data-testid="settings-save">Save</button>
+</form>
+<script src="{{ up }}{{ asset('settings.js') }}"></script>
+<script src="{{ up }}{{ asset('schedule.js') }}"></script>
+{% endblock %}

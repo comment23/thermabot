@@ -51,6 +51,32 @@ TITLES = {
 # `openings` stays in the setup wizard: entity IDs are dotted map keys, not form paths.
 ORDER = list(TITLES)
 
+# Task pages. Schedule has its own editor and is not a generic field list.
+TASKS: dict[str, tuple[str, ...]] = {
+    "comfort": (
+        "bands",
+        "display",
+        "season",
+        "seasonal_control",
+        "nudge",
+        "override",
+        "comfort",
+        "fan",
+    ),
+    "safety": ("safety", "off", "writes"),
+    "ha": ("thermostat", "sensors", "weather"),
+    "people": ("rooms", "weights", "presence", "aux_heat"),
+    "advanced": ("planner", "metrics", "alerts", "summary"),
+}
+TASK_TITLES = {
+    "comfort": "Comfort",
+    "safety": "Safety & control",
+    "ha": "Home Assistant",
+    "people": "People & rooms",
+    "advanced": "Advanced",
+    "schedule": "Schedule",
+}
+
 # Absolute temperatures (°F) outside `bands` (which are all absolute).
 ABS_TEMP = {
     "season.heat_below_f",
@@ -167,10 +193,10 @@ def _display(f: FormField, units: Units) -> None:
         f.value = f_to_c(f.value) if f.kind == "temp" else round(f.value * 5 / 9, 1)
 
 
-def sections(s: Settings, owner: bool) -> list[Section]:
+def sections(s: Settings, owner: bool, only: tuple[str, ...] | None = None) -> list[Section]:
     units: Units = s.display.units
     out: list[Section] = []
-    for name in ORDER:
+    for name in only or tuple(ORDER):
         fs: list[FormField] = []
         _walk(name, Settings.model_fields[name].annotation, getattr(s, name), fs)
         for f in fs:

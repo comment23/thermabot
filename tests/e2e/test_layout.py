@@ -93,19 +93,11 @@ def test_keyboard_skip_link_and_control_dialog_names(page: Page, srv: Srv, width
     opener = page.locator("[data-testid=kill-open]")
     opener.focus()
     page.keyboard.press("Enter")
-    stop_dialog = page.get_by_role("dialog", name="Stop the bot")
+    stop_dialog = page.get_by_role("dialog", name="Stop")
     expect(stop_dialog).to_be_visible()
     page.keyboard.press("Escape")
     expect(stop_dialog).to_be_hidden()
     expect(opener).to_be_focused()
-
-    mode = page.locator("[data-testid=control-mode]")
-    mode.click()
-    start_dialog = page.get_by_role("dialog", name="Start the bot")
-    expect(start_dialog).to_be_visible()
-    page.keyboard.press("Escape")
-    expect(start_dialog).to_be_hidden()
-    expect(mode).to_be_focused()
     assert_page_healthy(page, srv)
 
 
@@ -122,14 +114,11 @@ def test_header_on_every_page(page: Page, srv: Srv, user: str) -> None:
         assert r.status == 200, href
         assert_page_healthy(page, srv)
         expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-state", "SHADOW")
-        expect(page.locator("[data-testid=kill-state]")).to_have_text("Bot: Watching (Shadow)")
-        expect(page.locator("[data-testid=controls-link]")).to_have_attribute("href", "./#controls")
-        if user != "jordan" and href == "/":
-            expect(page.locator("[data-testid=kill-open]")).to_have_text("Stop bot")
+        expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Shadow")
+        if user != "jordan":
+            expect(page.locator("[data-testid=kill-open]")).to_have_text("Stop")
         assert page.locator("meta[name=csrf-token]").count() == 1
-        assert (page.locator("[data-testid=kill-open]").count() == 1) == (
-            user != "jordan" and href == "/"
-        )
+        assert (page.locator("[data-testid=kill-open]").count() == 1) == (user != "jordan")
 
 
 @pytest.mark.brd("FR-UI-2")
@@ -137,7 +126,7 @@ def test_sse_updates_badge_live(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
     expect(page.locator("html")).to_have_attribute("data-live", "sse")
     srv.ctx.broker.publish("state", {"state": "DISABLED", "label": "DISABLED"})
-    expect(page.locator("[data-testid=state-badge]")).to_have_text("DISABLED")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
     assert_page_healthy(page, srv)
 
 
@@ -163,13 +152,12 @@ def test_polling_fallback_when_sse_fails(page: Page, srv: Srv) -> None:
 def test_kill_switch_dialog_goes_through_api(page: Page, srv: Srv) -> None:
     login(page, srv, "ann")
     page.click("[data-testid=kill-open]")
-    expect(page.locator("[data-testid=kill-dialog]")).to_be_visible()
-    expect(page.locator("[data-testid=kill-on-shadow]")).to_be_hidden()
-    expect(page.locator("[data-testid=kill-dialog] h3:visible")).to_have_text("Stop the bot")
+    expect(page.locator("[data-testid=stop-sheet]")).to_be_visible()
+    expect(page.locator("[data-testid=stop-sheet] h3:visible")).to_have_text("Stop")
     page.click("[data-testid=kill-off]")
     expect(page.locator("[data-testid=toast]")).to_contain_text("Bot stopped")
     expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-state", "DISABLED")
-    expect(page.locator("[data-testid=kill-state]")).to_have_text("Bot: Stopped")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
     expect(page.locator("[data-testid=kill-open]")).to_be_hidden()  # admin cannot start
     acts = [r[0] for r in srv.ctx.conn.execute("SELECT action FROM audit WHERE actor='ann'")]
     assert "kill_off" in acts
@@ -202,21 +190,18 @@ def test_kill_restore_result_is_visible(
 def test_owner_stop_then_start_buttons(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
     btn = page.locator("[data-testid=kill-open]")
-    expect(btn).to_have_text("Stop bot")
+    expect(btn).to_have_text("Stop")
     btn.click()
     page.click("[data-testid=kill-off]")
-    expect(page.locator("[data-testid=kill-state]")).to_have_text("Bot: Stopped")
-    expect(btn).to_have_text("Start bot")
-    expect(btn).to_have_class("start")
-    btn.click()
-    expect(page.locator("[data-testid=kill-dialog] h3:visible")).to_have_text("Start the bot")
-    expect(page.locator("[data-testid=kill-off]")).to_be_hidden()
-    page.click("[data-testid=kill-on-shadow]")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
+    expect(btn).to_have_text("Resume")
+    expect(btn).to_have_class("resume")
+    btn.click()  # one tap back to Shadow; Active stays on the safety page
     expect(page.locator("[data-testid=toast]")).to_contain_text("Bot started")
-    expect(page.locator("[data-testid=kill-state]")).to_have_text("Bot: Watching (Shadow)")
-    expect(btn).to_have_text("Stop bot")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Shadow")
+    expect(btn).to_have_text("Stop")
     page.reload()  # server-rendered header agrees with the live update
-    expect(page.locator("[data-testid=kill-open]")).to_have_text("Stop bot")
+    expect(page.locator("[data-testid=kill-open]")).to_have_text("Stop")
     body = page.locator("body").inner_text().lower()
     assert "kill" not in body
     assert_page_healthy(page, srv)

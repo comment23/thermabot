@@ -91,7 +91,26 @@
     e.preventDefault();
     e.stopImmediatePropagation();
     const body = collect();
-    if (same(body, JSON.parse(form.dataset.settings))) { tb.toast('No changes', 'ok'); refresh(); return; }
+    const stored = JSON.parse(form.dataset.settings);
+    if (same(body, stored)) { tb.toast('No changes', 'ok'); refresh(); return; }
+    if (form.dataset.review === 'safety') {
+      const lines = [];
+      const walk = (a, b, path) => {
+        if (a && b && typeof a === 'object') {
+          for (const k of Object.keys(b)) walk(a[k], b[k], path ? path + '.' + k : k);
+          return;
+        }
+        if (JSON.stringify(a) !== JSON.stringify(b)) lines.push(path + ': ' + JSON.stringify(a) + ' → ' + JSON.stringify(b));
+      };
+      walk(stored, body, '');
+      const ok = await tb.ask({
+        title: 'Save safety settings',
+        body: lines.slice(0, 12).join('\n') || 'Save these safety settings.',
+        typed: 'SAVE',
+        confirm: 'Save',
+      });
+      if (!ok) return;
+    }
     const res = await tb.api('PUT', 'api/settings', body);
     const errs = form.querySelector('.errors');
     errs.textContent = res.ok ? '' : tb.detail(res);

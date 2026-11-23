@@ -164,7 +164,7 @@ def test_dashboard_setup_needed_banner(page: Page, srv: Srv) -> None:
     srv.ctx.settings = Settings()  # a fresh install: no thermostat configured
     login(page, srv, "alex", destination="/setup")
     page.goto(f"{srv.url}/")
-    expect(page.locator("[data-testid=state-badge]")).to_have_text("SETUP NEEDED")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Setup needed")
     banner = page.locator("[data-testid=setup-needed]")
     expect(banner).to_contain_text("no thermostat is configured")
     assert banner.locator("a").get_attribute("href") == "setup"  # relative (ingress)

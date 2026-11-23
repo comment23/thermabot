@@ -105,7 +105,7 @@ def test_grid_bounds() -> None:
 def test_gzip_and_versioned_static(tmp_path: Path) -> None:
     _, _, c = make(tmp_path)
     login(c, "alex")
-    page = c.get("/", headers={"Accept-Encoding": "gzip"})
+    page = c.get("/history", headers={"Accept-Encoding": "gzip"})
     assert page.headers.get("content-encoding") == "gzip"
     v = thermabot.__version__
     static = Path(__file__).resolve().parents[2] / "thermabot" / "app" / "static"

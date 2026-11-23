@@ -464,6 +464,38 @@ class Controller:
             ),
         )
 
+    def guard_context(
+        self,
+        snap: Snapshot | None,
+        now: datetime,
+        live: statemachine.Live,
+        persisted: statemachine.Persisted | None,
+        *,
+        override_open: bool | None = None,
+        guard_extra: dict[str, Any] | None = None,
+    ) -> GuardCtx:
+        """The context `evaluate` sees for one tick. Plan explanations use the same shape."""
+        dev_min, dev_max = 50.0, 90.0
+        if snap is not None and snap.thermostat.min_temp is not None:
+            dev_min = snap.thermostat.min_temp
+        if snap is not None and snap.thermostat.max_temp is not None:
+            dev_max = snap.thermostat.max_temp
+        return GuardCtx(
+            kill_switch=None if persisted is None else persisted.kill_switch,
+            ha_mirror=live.ha_mirror,
+            run_mode="shadow" if persisted is None else persisted.run_mode,
+            override_open=live.override_open if override_open is None else override_open,
+            snapshot=snap,
+            recent_writes=self.recent_writes(now),
+            preset_cleared=bool(persisted and persisted.preset_cleared),
+            settings=self.settings,
+            now=now,
+            safety_hold_until=self.hold_until,
+            device_min_f=dev_min,
+            device_max_f=dev_max,
+            **(guard_extra or {}),
+        )
+
     def recent_writes(self, now: datetime) -> list[WriteRecord]:
         rows = self.conn.execute(
             "SELECT ts, service, data_json FROM writes WHERE outcome='sent' AND ts >= ?",
@@ -714,26 +746,14 @@ class Controller:
                 act = apply_device_mode(
                     align_action(act, snap.thermostat), snap.thermostat.hvac_modes
                 )
-            dev_min, dev_max = 50.0, 90.0
-            if snap is not None and snap.thermostat.min_temp is not None:
-                dev_min = snap.thermostat.min_temp
-            if snap is not None and snap.thermostat.max_temp is not None:
-                dev_max = snap.thermostat.max_temp
-            ctx = GuardCtx(
-                kill_switch=None if persisted is None else persisted.kill_switch,
-                ha_mirror=live.ha_mirror,
-                run_mode="shadow" if persisted is None else persisted.run_mode,
+            ctx = self.guard_context(
+                snap,
+                now,
+                live,
+                persisted,
                 override_open=live.override_open
                 and not (manual_override and eff.state == "OVERRIDE"),
-                snapshot=snap,
-                recent_writes=self.recent_writes(now),
-                preset_cleared=bool(persisted and persisted.preset_cleared),
-                settings=self.settings,
-                now=now,
-                safety_hold_until=self.hold_until,
-                device_min_f=dev_min,
-                device_max_f=dev_max,
-                **(guard_extra or {}),
+                guard_extra=guard_extra,
             )
             d = evaluate(act, ctx)
             allowed_by_state = (

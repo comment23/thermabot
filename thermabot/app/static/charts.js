@@ -245,9 +245,13 @@
       });
       el.dataset.series = series.length - 1;
       el.dataset.dashed = series.filter((s) => s.dash).length;
-      return [{ series, axes: axes(p, '°F'), scales: { x: { time: true } },
+      const units = d.units || 'F';
+      const conv = (arr) => (arr || []).map((v) => (v == null ? null : (units === 'C' ? Math.round((v - 32) * 50 / 9) / 10 : v)));
+      for (let i = 1; i < cols.length; i++) cols[i] = conv(cols[i]);
+      el.dataset.xSpan = String((d.t[d.t.length - 1] || 0) - (d.t[0] || 0) || (d.step_s || 900));
+      return [{ series, axes: axes(p, '°' + units), scales: { x: { time: true, range: timeRange } },
         plugins: [tooltip((u, i) => ({ title: fmtT(d.t[i]), items: series.slice(1).map((s, k) => ({
-          label: s.label, color: s.stroke, value: deg(cols[k + 1][i], 'F') })) }))] }, cols];
+          label: s.label, color: s.stroke, value: deg(cols[k + 1][i], units) })) }))] }, cols];
     });
   }
 
@@ -318,7 +322,7 @@
       }
       return [{ series, bands: d.band.length ? [{ series: [4, 3], fill: p.band }] : [],
         scales: { x: { time: false }, y: { range: (u, mn, mx) => [Math.min(0, mn), mx * 1.08 + 0.5] } },
-        axes: [{ ...axes(p)[0], label: 'mean outdoor °F', labelFont: '12px system-ui, sans-serif', size: 48 }, axes(p, 'min / degree-day')[1]],
+        axes: [{ ...axes(p)[0], label: 'mean outdoor', labelFont: '12px system-ui, sans-serif', size: 48 }, axes(p, 'min / degree-day')[1]],
         legend: { show: false },
         plugins: [tooltip((u, i) => (pts[i] == null && fit[i] == null ? null : { title: (days[i] || '') + ' ' + xs[i] + ' °F',
           items: [{ label: 'Runtime', color: c, value: pts[i] == null ? null : pts[i].toFixed(1) + ' min/DD' },
@@ -345,6 +349,11 @@
     });
   }
 
+  function timeRange(u, min, max) {
+    const span = max - min;
+    const pad = span < 120 ? 15 * 60 : Math.max(span * 0.04, 60);
+    return [min - pad, max + pad];
+  }
   const kinds = { plan, daily, forecast, efficiency, savings };
   function init() {
     if (!window.uPlot) return;
@@ -355,7 +364,7 @@
     }
     document.querySelectorAll('[data-history-card]').forEach(historyLive);
   }
-  window.tbCharts = { mount, tooltip, state };
+  window.tbCharts = { mount, tooltip, state, timeRange };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

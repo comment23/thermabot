@@ -111,6 +111,23 @@ class Snapshot(BaseModel):
     watchdog_last: datetime | None = None
 
 
+class ReasonFactor(BaseModel):
+    """One tagged reason for a plan step. `text` is already short enough to show."""
+
+    tag: Literal["schedule", "weather", "model", "presence", "comfort", "runtime"]
+    text: str
+    source: str = ""
+    age: str = ""
+
+
+class GuardCheck(BaseModel):
+    """One row of the write-guard chain, in `guards.evaluate` order."""
+
+    guard: str
+    ok: bool
+    note: str
+
+
 class PlanStep(BaseModel):
     t: datetime
     hvac_mode: HvacMode
@@ -122,6 +139,10 @@ class PlanStep(BaseModel):
     pred_u: float | None = None
     score: float | None = None
     reason: str = ""
+    factors: list[ReasonFactor] = Field(default_factory=list)
+    # Filled when the plan is saved. Forward ref: Decision is defined below.
+    decision: Decision | None = None
+    checks: list[GuardCheck] = Field(default_factory=list)
 
 
 class Plan(BaseModel):
@@ -147,6 +168,9 @@ class Decision(BaseModel):
     reason: str
     would_write: bool = False
     guard: str | None = None  # first guard that denied (or 'shadow'), None when allowed
+
+
+PlanStep.model_rebuild()
 
 
 class AlertEvent(BaseModel):

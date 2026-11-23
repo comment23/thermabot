@@ -86,6 +86,33 @@ def test_chart_renders_estimated_room_dashed(page: Page, srv: Srv) -> None:
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-PLN-6")
+def test_one_step_plan_keeps_a_short_axis_and_a_single_mode_word(page: Page, srv: Srv) -> None:
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    srv.ctx.snapshot = Snapshot(
+        t=t0,
+        thermostat=ThermostatState(
+            hvac_mode="heat", current_temp=70, heat_sp=68, last_reported=t0, hvac_modes=["heat"]
+        ),
+    )
+    srv.ctx.plan = Plan(
+        kind="optimised",
+        created_at=t0,
+        steps=[PlanStep(t=t0, hvac_mode="heat", heat_sp=67, pred_t=67, reason="home block")],
+    )
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/plan")
+    chart = page.locator("[data-testid=chart]")
+    span = page.evaluate("() => tbCharts.timeRange(null, 1_700_000_000, 1_700_000_000)")
+    assert span[1] - span[0] < 7 * 24 * 3600
+    expect(page.locator("[data-testid=change]")).to_contain_text("Heat to 67")
+    expect(page.locator("[data-testid=change]")).not_to_contain_text("heat heat")
+    assert chart.locator("canvas").count() == 1
+    page.click("text=Why this?")
+    expect(page.locator("[data-testid=guard-list]")).to_contain_text("stops here, nothing is sent")
+    assert_page_healthy(page, srv)
+
+
 @pytest.mark.brd("FR-UI-1")
 def test_no_plan_yet(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
