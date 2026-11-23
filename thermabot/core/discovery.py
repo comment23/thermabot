@@ -41,6 +41,7 @@ class Entity(BaseModel):
     target_temp_high: float | None = None
     preset_modes: list[str] = []
     current_position: float | None = None
+    last_changed: str | None = None
 
 
 class Candidate(BaseModel):
@@ -51,6 +52,7 @@ class Candidate(BaseModel):
     reason: str
     room: str | None = None  # rooms only: suggested room key
     device_class: str | None = None
+    last_changed: str | None = None
 
 
 class Discovery(BaseModel):
@@ -111,6 +113,7 @@ def summarise(st: Mapping[str, Any]) -> Entity:
         target_temp_high=_num(a.get("target_temp_high")),
         preset_modes=_list(a.get("preset_modes")),
         current_position=_num(a.get("current_position")),
+        last_changed=_changed(st),
     )
 
 
@@ -135,6 +138,11 @@ def room_key(e: Entity) -> str:
     return re.sub(r"[^a-z0-9_]", "_", obj.lower()).strip("_") or "room"
 
 
+def _changed(st: Mapping[str, Any]) -> str | None:
+    raw = st.get("last_changed") or st.get("last_updated") or st.get("last_reported")
+    return raw if isinstance(raw, str) and raw else None
+
+
 def _c(e: Entity, conf: float, reason: str, room: str | None = None) -> Candidate:
     return Candidate(
         entity_id=e.entity_id,
@@ -144,6 +152,7 @@ def _c(e: Entity, conf: float, reason: str, room: str | None = None) -> Candidat
         reason=reason,
         room=room,
         device_class=e.device_class,
+        last_changed=e.last_changed,
     )
 
 
