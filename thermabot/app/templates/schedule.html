@@ -41,11 +41,13 @@
       {% for name in ['home', 'sleep', 'away'] %}
         {% set pair = settings.bands[season][name] %}
         <label>{{ season }} {{ name }} low
-          <input type="range" min="50" max="90" step="0.5" data-path="bands.{{ season }}.{{ name }}.0" data-kind="temp"
-            data-f="{{ pair[0] }}" value="{{ pair[0] }}"></label>
+          <input type="range" min="{{ 50|tempnum(units) }}" max="{{ 90|tempnum(units) }}" step="{{ 0.5 if units == 'F' else 0.1 }}"
+            data-path="bands.{{ season }}.{{ name }}.0" data-kind="temp"
+            data-f="{{ pair[0] }}" value="{{ pair[0]|tempnum(units) }}"></label>
         <label>{{ season }} {{ name }} high
-          <input type="range" min="50" max="90" step="0.5" data-path="bands.{{ season }}.{{ name }}.1" data-kind="temp"
-            data-f="{{ pair[1] }}" value="{{ pair[1] }}"></label>
+          <input type="range" min="{{ 50|tempnum(units) }}" max="{{ 90|tempnum(units) }}" step="{{ 0.5 if units == 'F' else 0.1 }}"
+            data-path="bands.{{ season }}.{{ name }}.1" data-kind="temp"
+            data-f="{{ pair[1] }}" value="{{ pair[1]|tempnum(units) }}"></label>
       {% endfor %}
     {% endfor %}
   </fieldset>

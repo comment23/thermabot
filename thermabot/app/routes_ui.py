@@ -89,9 +89,16 @@ def _temp(value: object, units: str = "F", delta: bool = False) -> str:
     return format_temp(float(value), unit, delta=delta)
 
 
+def _temp_num(value: object, units: str = "F") -> str:
+    """The display number only, for inputs that must not include the unit suffix."""
+    text = _temp(value, units)
+    return text[:-2] if text.endswith(("°F", "°C")) else text
+
+
 templates.env.filters["localtime"] = localtime
 templates.env.filters["num"] = lambda x: "—" if x is None else f"{x:g}"
 templates.env.filters["temp"] = _temp
+templates.env.filters["tempnum"] = _temp_num
 # v0.3.0 ingress: links are relative ('/plan' -> 'plan', '/' -> './'). Nested pages prefix
 # them with `up` (`../`) so they still resolve under any root path.
 templates.env.filters["rel"] = lambda h: h.lstrip("/") or "./"
