@@ -5,8 +5,17 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
-## Unreleased
+## 0.6.8-rc.7 - 2026-11-23 (prerelease)
 
+The Home Assistant add-on catalog version is `0.6.8-rc.7`. The in-app version remains
+`0.6.8`. Stable v0.6.8 is still blocked on the seven-day SHADOW soak and owner review.
+This prerelease does not enable control by itself.
+
+- Install the add-on from public images, `ghcr.io/comment23/thermabot-addon-amd64` and
+  `ghcr.io/comment23/thermabot-addon-aarch64`, tag `0.6.8-rc.7`. Supervisor pulls the
+  image for the host and does not build on the device. CI publishes both from native
+  runners when `main` is updated, and again when the matching `v0.6.8-rc.7` tag is
+  pushed. `docker/setup-qemu-action` is not used.
 - Convert Home Assistant °C temperatures to °F inside the app and convert setpoints back
   to the device unit on the single write path. An unknown unit clears the reading, is
   logged, and blocks every climate write, including safety and kill-switch restore.
@@ -19,9 +28,6 @@ private development repository.
 - Type-check the whole `thermabot` package with `mypy --strict`, including the write path.
 - Bump `opentelemetry-api` to 1.45.2 (CVE-2026-126360). FastAPI pulls it in; the
   previous pin failed `pip-audit` on main as well.
-- List `aarch64` on the add-on. The tagged container image stays amd64: the Actions
-  allowlist does not include `docker/setup-qemu-action`, so CI cannot cross-build arm64.
-  Supervisor still builds the add-on for each architecture in `addon/config.yaml`.
 
 ## 0.6.8-rc.6 - 2026-11-10 (prerelease)
 

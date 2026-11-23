@@ -1,11 +1,15 @@
 # thermabot add-on changelog
 
-## Unreleased
+## 0.6.8-rc.7 - 2026-11-23 (prerelease)
 
-- Request amd64 and aarch64. The Dockerfile takes Supervisor's `BUILD_ARCH` and does not
-  install amd64-only packages. This repo does not push the add-on image; Supervisor builds
-  it per architecture. The tagged plain image stays amd64 because CI cannot run QEMU.
+- Supervisor pulls a prebuilt image instead of building this add-on on the device.
+  The image is `ghcr.io/comment23/thermabot-addon-{arch}` tagged `0.6.8-rc.7`, for amd64
+  and aarch64. CI publishes those images from `main` and from the matching `v0.6.8-rc.7`
+  tag, on native runners. `docker/setup-qemu-action` is not on the Actions allowlist and
+  is not used.
 - Leave `TZ` unset unless the timezone option is set, so the app follows Home Assistant.
+- Application behavior included in this image is listed in the root changelog under
+  0.6.8-rc.7. Stable v0.6.8 is still blocked on the documented SHADOW soak.
 
 ## 0.6.8-rc.6 - 2026-11-10 (prerelease)
 
@@ -65,7 +69,7 @@
   advanced HA URL/token override for pointing at a different Home Assistant instance.
 - Thermostat entity, rooms, bands, schedule and presence are still configured in the
   in-app setup wizard / Settings page (unchanged; already ingress-friendly since v0.3.0).
-- amd64 only at that release; aarch64 is requested from the unreleased add-on manifest.
-- CI validates `addon/config.yaml` and `repository.yaml` on every push/PR
-  (`.github/workflows/ci.yml`: `addon-config` job). The security job also builds and scans
-  the add-on image; Supervisor builds the image from source on install.
+- amd64 only at that release.
+- CI validated `addon/config.yaml` and `repository.yaml`. The security job built and
+  scanned the add-on image. Supervisor built the image from source on install; 0.6.8-rc.7
+  replaced that local build with published images.
