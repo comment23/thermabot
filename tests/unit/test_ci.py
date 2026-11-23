@@ -49,6 +49,44 @@ def test_ci_workflow_has_all_jobs() -> None:
     # public repo at stage 6).
     assert "ghcr.io/comment23/thermabot-dev:" in tags and "ghcr.io/comment23/thermabot:" not in tags
     assert jobs["image"]["permissions"]["packages"] == "write"
+    # The plain ghcr.io/comment23/thermabot name stays reserved. Add-on images use a suffix.
+    ci_text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "ghcr.io/comment23/thermabot:" not in ci_text
+    for job in jobs.values():
+        for step in job.get("steps") or []:
+            assert "setup-qemu-action" not in str(step.get("uses") or "")
+
+
+@pytest.mark.brd("NFR-SEC-5")
+def test_addon_publish_uses_native_runners_and_config_version() -> None:
+    wf = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    jobs = wf["jobs"]
+    publish = jobs["addon-publish"]
+    assert "refs/heads/main" in publish["if"]
+    assert "refs/tags/v" in publish["if"]
+    assert "addon-config" in publish["needs"]
+    rows = {row["arch"]: row for row in publish["strategy"]["matrix"]["include"]}
+    assert rows["amd64"]["runner"] == "ubuntu-24.04"
+    assert rows["amd64"]["platform"] == "linux/amd64"
+    assert rows["aarch64"]["runner"] == "ubuntu-24.04-arm"
+    assert rows["aarch64"]["platform"] == "linux/arm64"
+    steps = "\n".join(str(step.get("run", "")) for step in publish["steps"])
+    assert "--file addon/Dockerfile" in steps
+    assert "docker build addon" not in steps
+    assert 'check_addon_config.py --arch "${{ matrix.arch }}" --github-output' in steps
+    assert "--set-public --require-public" in steps
+    assert publish["permissions"]["packages"] == "write"
+    resolve = jobs["addon-image-resolve"]
+    assert resolve["needs"] == "addon-publish"
+    resolve_steps = " ".join(str(step.get("run", "")) for step in resolve["steps"])
+    assert "check_addon_config.py --require-public" in resolve_steps
+    arm = jobs["addon-aarch64"]
+    assert arm["runs-on"] == "ubuntu-24.04-arm"
+    assert "pull_request" in arm["if"]
+    arm_steps = "\n".join(str(step.get("run", "")) for step in arm["steps"])
+    assert "--platform linux/arm64" in arm_steps
+    assert "--file addon/Dockerfile" in arm_steps
+    assert "BUILD_ARCH=aarch64" in arm_steps
 
 
 @pytest.mark.brd("NFR-SEC-5")

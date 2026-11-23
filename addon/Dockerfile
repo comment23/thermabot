@@ -1,8 +1,14 @@
 # syntax=docker/dockerfile:1
 # Home Assistant add-on image. Extends the hassio-addons base so Supervisor's
-# ingress/s6 expectations are met, then installs the SAME app from the SAME requirements
+# ingress expectations are met, then installs the same app from the same requirements
 # lock as the plain-Docker image (Dockerfile at repo root). The plain-Docker path is
 # untouched by this file.
+#
+# Supervisor does not build this file. addon/config.yaml sets `image:`, and Supervisor
+# pulls ghcr.io/comment23/thermabot-addon-{arch}:<version>. CI publishes that image with
+# the repository root as the build context (`docker build --file addon/Dockerfile .`).
+# The COPY paths below are root-relative on purpose. `docker build addon/` is the context
+# Supervisor would use only when `image` is absent, and it is not a supported install path.
 ARG BUILD_FROM=ghcr.io/hassio-addons/base:21.0.10
 FROM ${BUILD_FROM}
 ARG VERSION=dev

@@ -56,7 +56,9 @@ Tag new tests with the requirement they cover: `@pytest.mark.brd("FR-...")`.
   that automated tests substitute for a live soak or owner review.
 - Update the README's release-status section in the same change so it points to the latest
   stable and prerelease versions. Mirror add-on-specific notes in `addon/CHANGELOG.md` and
-  keep `addon/config.yaml` aligned with the add-on version.
+  keep `addon/config.yaml` aligned with the add-on version. That `version` is the tag
+  Supervisor pulls for `ghcr.io/comment23/thermabot-addon-{arch}`. Bump it when the add-on
+  image should change; CI publishes it from `main` and from a matching `v<version>` tag.
 - Include matching notes in the GitHub release. Do not publish a stable release while a
   documented gate is pending; if a publication happens before its docs update, follow up
   immediately with the changelog and README correction.
