@@ -233,6 +233,141 @@ async def plan(c: CtxD, _: View) -> Plan:
     return c.plan
 
 
+class ReadyCheck(BaseModel):
+    id: str
+    ok: bool
+    label: str
+    detail: str
+
+
+class ReadinessOut(BaseModel):
+    ready: bool
+    checks: list[ReadyCheck]
+    first_write: str | None = None
+
+
+def readiness_of(c: Ctx) -> ReadinessOut:
+    """What has to be true before Active is offered. The server still refuses a short soak."""
+    from thermabot.app.present import action_sentence
+    from thermabot.app.units import temperature_scale
+
+    now = c.clock()
+    st = db.read_bot_state(c.conn)
+    days = sm.shadow_days(st, now) if st else 0.0
+    model = c.conn.execute(
+        "SELECT version FROM models WHERE active=1 ORDER BY version DESC LIMIT 1"
+    ).fetchone()
+    snap = c.snapshot
+    th = snap.thermostat if snap else None
+    caps = (
+        th is not None
+        and temperature_scale(th.temperature_unit) is not None
+        and th.target_temp_step is not None
+        and th.target_temp_step > 0
+        and th.min_temp is not None
+        and th.max_temp is not None
+    )
+    net = c.heartbeat_configured or c.watchdog_helper in ("on", "off")
+    s = load_settings(c)
+    checks = [
+        ReadyCheck(
+            id="soak",
+            ok=days >= sm.SHADOW_MIN_DAYS,
+            label=f"Shadow soak {min(days, sm.SHADOW_MIN_DAYS):.0f}/{sm.SHADOW_MIN_DAYS} days",
+            detail=f"{days:.1f} days of Shadow so far",
+        ),
+        ReadyCheck(
+            id="model",
+            ok=model is not None,
+            label="Thermal model fitted",
+            detail="A model is active" if model else "No fitted model yet",
+        ),
+        ReadyCheck(
+            id="ha",
+            ok=c.ha_health == "ok",
+            label="Home Assistant healthy",
+            detail=c.ha_health,
+        ),
+        ReadyCheck(
+            id="sensors",
+            ok=not s.sensors_missing,
+            label="Sensors configured",
+            detail="Blower, compressor, or outdoor is set"
+            if not s.sensors_missing
+            else "No HVAC sensor is configured",
+        ),
+        ReadyCheck(
+            id="device",
+            ok=bool(caps),
+            label="Device capabilities verified",
+            detail="Unit, step, and range are known" if caps else "Capabilities are missing",
+        ),
+        ReadyCheck(
+            id="net",
+            ok=net,
+            label="Home Assistant safety net installed",
+            detail="Heartbeat or watchdog helper is present"
+            if net
+            else "Install the optional HA package before Active",
+        ),
+    ]
+    first: str | None = None
+    if c.plan is not None:
+        nxt = next((step for step in c.plan.steps if step.t > now), None)
+        if nxt is None and c.plan.steps:
+            nxt = c.plan.steps[0]
+        if nxt is not None:
+            first = action_sentence(nxt, s.display.units)
+            if st is None or st.run_mode != "active":
+                first += " · Shadow would not send this"
+    return ReadinessOut(ready=all(ch.ok for ch in checks), checks=checks, first_write=first)
+
+
+@router.get("/api/readiness", response_model=ReadinessOut)
+async def readiness(
+    c: CtxD, _: Annotated[Principal, Depends(require("edit_safety"))]
+) -> ReadinessOut:
+    return readiness_of(c)
+
+
+@router.post("/api/schedule/preview")
+async def schedule_preview(
+    body: Settings, c: CtxD, _: Annotated[Principal, Depends(require("edit_comfort"))]
+) -> dict[str, str]:
+    """Ask the planner how runtime would change. Nothing is saved."""
+    from thermabot.core import planner
+
+    current = load_settings(c)
+    try:
+        before = planner.runtime_min(c.plan) if c.plan is not None else None
+        draft = c.plan
+        if c.forecast is not None and c.snapshot is not None and c.snapshot.thermostat.current_temp:
+            th = c.snapshot.thermostat
+            draft = planner.plan(
+                planner.PlanInputs(
+                    now=c.clock(),
+                    t0=th.current_temp,
+                    current_mode=th.hvac_mode,
+                    forecast=c.forecast,
+                    settings=body,
+                    hvac_modes=list(th.hvac_modes),
+                    current_sp=(th.heat_sp, th.cool_sp),
+                )
+            )
+        after = planner.runtime_min(draft) if draft is not None else None
+    except Exception:  # noqa: BLE001 - preview never blocks the editor
+        before = after = None
+    if before is None or after is None:
+        sentence = "Runtime preview waits for a forecast. Saving still replans."
+    else:
+        delta = after - before
+        sentence = (
+            f"Predicted runtime {delta:+.0f} min over the horizon versus the saved schedule "
+            f"({current.display.units} display)."
+        )
+    return {"sentence": sentence}
+
+
 def forecast_view(c: Ctx) -> dict[str, Any]:
     """v0.4.0: hourly forecast + 48 h plan projection (display only; never feeds the plan)."""
     from thermabot.app.jobs import active_model
