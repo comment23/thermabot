@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from thermabot.config import BlockName, Settings
-from thermabot.core.fallback import fallback_setpoints
+from thermabot.core.fallback import choose_hold_mode, fallback_setpoints
 from thermabot.core.limits import OFF_ABS_CAP_H, OFF_FORCED_ON_H
 from thermabot.core.types import Action, HouseState, Snapshot
 
@@ -58,13 +58,34 @@ def allows_drift(snap: Snapshot, kind: Literal["heat", "cool"], lo: float, hi: f
     """True unless the thermostat is already conditioning toward the restore target."""
     th = snap.thermostat
     if kind == "heat":
-        return th.hvac_mode not in ("heat", "heat_cool") or th.heat_sp is None or th.heat_sp < lo
-    return th.hvac_mode not in ("cool", "heat_cool") or th.cool_sp is None or th.cool_sp > hi
+        return (
+            th.hvac_mode not in ("heat", "heat_cool", "auto")
+            or th.heat_sp is None
+            or th.heat_sp < lo
+        )
+    return (
+        th.hvac_mode not in ("cool", "heat_cool", "auto") or th.cool_sp is None or th.cool_sp > hi
+    )
+
+
+def _restore_data(
+    mode: str, heat: float | None, cool: float | None
+) -> dict[str, float | str | None] | None:
+    if mode in ("heat_cool", "auto") and heat is not None and cool is not None:
+        return {"hvac_mode": mode, "target_temp_low": heat, "target_temp_high": cool}
+    if mode == "heat" and heat is not None:
+        return {"hvac_mode": "heat", "temperature": heat}
+    if mode == "cool" and cool is not None:
+        return {"hvac_mode": "cool", "temperature": cool}
+    return None
 
 
 def check(snap: Snapshot, s: Settings, block: BlockName, now: datetime) -> RestoreResult | None:
-    """Every tick, independent of the plan. One heat_cool write at the active block's band
-    edges (heat-band low / cool-band high), flagged safety_restore."""
+    """Every tick, independent of the plan. One write at the active block's band edges
+    (heat-band low / cool-band high), flagged safety_restore. The mode is one the
+    thermostat lists (heat_cool or auto when present, else heat or cool for the crossing).
+    An empty mode list does not assume heat_cool, so a unit or capability mismatch cannot
+    restore by writing a mode the device does not support."""
     hit = crossing(snap, s)
     if hit is None or not s.thermostat.configured:  # v0.2.0: no thermostat, no restore
         return None
@@ -72,10 +93,18 @@ def check(snap: Snapshot, s: Settings, block: BlockName, now: datetime) -> Resto
     lo, hi = fallback_setpoints(s, block)
     if not allows_drift(snap, kind, lo, hi):
         return None
+    choice = choose_hold_mode(
+        snap.thermostat.hvac_modes, lo, hi, snap.thermostat.current_temp, direction=kind
+    )
+    if choice is None:
+        return None
+    data = _restore_data(*choice)
+    if data is None:
+        return None
     act = Action(
         service="set_temperature",
         entity_id=s.thermostat.entity_id,
-        data={"hvac_mode": "heat_cool", "target_temp_low": lo, "target_temp_high": hi},
+        data=data,
         safety_restore=True,
     )
     hold = now + timedelta(minutes=s.safety.hold_after_restore_min)

@@ -36,7 +36,9 @@ class Env(BaseSettings):
     HEARTBEAT_WEBHOOK_URL: str | None = None
     ALERT_WEBHOOK_TOKEN: SecretStr | None = None
     BOB_TOKEN: SecretStr | None = None
-    TZ: str = "America/New_York"
+    # Empty follows Home Assistant's configured time_zone, then UTC.
+    # A non-empty value (the Docker image sets America/New_York) wins.
+    TZ: str = ""
     DATA_DIR: str = "/data"
     PORT: int = 8095
     LOG_LEVEL: str = "INFO"

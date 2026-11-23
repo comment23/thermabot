@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from thermabot.config import Settings
 from thermabot.core.fallback import Current, fallback_plan
 from thermabot.core.planner import Choice, ctrl_step
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.thermal import ThermalParams
 from thermabot.core.types import Forecast, ForecastPoint, HvacMode, Plan, PlanStep
 from thermabot.core.weather import forecast_season
@@ -52,7 +52,7 @@ class Projection(BaseModel):
 
 
 def _hour_of(t: datetime) -> float:
-    lt = t.astimezone(TZ)
+    lt = t.astimezone(active_zone())
     return lt.hour + lt.minute / 60
 
 

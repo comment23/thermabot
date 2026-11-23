@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from thermabot.core.metrics import Baseline, Savings
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 
 DayKind = Literal["heating", "cooling", "mild"]
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -99,13 +99,13 @@ def stretches(days: list[DayForecast]) -> list[str]:
 
 def next_fire(now: datetime, weekday: str = "sun", hhmm: str = "18:00") -> datetime:
     """Next local fire time strictly after now (DST-safe: built in local wall time)."""
-    lt = now.astimezone(TZ)
+    lt = now.astimezone(active_zone())
     h, m = (int(x) for x in hhmm.split(":"))
     wd = WEEKDAYS.index(weekday)
     for off in range(8):
         d = lt.date() + timedelta(days=off)
         if d.weekday() == wd:
-            cand = datetime(d.year, d.month, d.day, h, m, tzinfo=TZ)
+            cand = datetime(d.year, d.month, d.day, h, m, tzinfo=active_zone())
             if cand > lt:
                 return cand
     raise AssertionError("unreachable")

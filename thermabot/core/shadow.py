@@ -32,13 +32,13 @@ from thermabot.core.comfort import (
 )
 from thermabot.core.metrics import MinuteSample, runtime
 from thermabot.core.planner import Choice, ctrl_step
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.thermal import ThermalParams
 from thermabot.core.types import Season
 
 STEP_MIN = 15
 GAP = timedelta(minutes=2)  # a longer gap resets consecutive-violation counters
-MODES = ("off", "heat", "cool", "heat_cool")
+MODES = ("off", "heat", "cool", "heat_cool", "auto")
 
 
 class Setpoints(BaseModel):
@@ -185,7 +185,7 @@ def simulate(rows: Sequence[MinuteRow], p: ThermalParams, which: str) -> Sim:
         c = _choice(r0.bot if which == "bot" else r0.actual)
         if c is None or r0.t_in is None or r0.t_out is None:
             continue
-        lt = r0.t.astimezone(TZ)
+        lt = r0.t.astimezone(active_zone())
         t_end, u = ctrl_step(r0.t_in, r0.t_out, lt.hour + lt.minute / 60, c, p)
         n = len(idx)
         sim.steps += 1

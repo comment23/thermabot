@@ -30,11 +30,13 @@ def _ctx(entity: str | None = None, temp: float = 70, mode: str = "heat_cool") -
     s = HOUSE if entity is None else Settings(thermostat=ThermostatCfg(entity_id=entity))
     th = ThermostatState(
         hvac_mode=mode,
+        hvac_modes=["off", "heat", "cool", "heat_cool"],
         current_temp=temp,
         heat_sp=68,
         cool_sp=76,
         fan_mode="auto",
         last_reported=NOW - timedelta(minutes=1),
+        temperature_unit="°F",
     )
     return GuardCtx(
         kill_switch="on",

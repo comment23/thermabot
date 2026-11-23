@@ -22,13 +22,22 @@ from pydantic import ValidationError
 
 from thermabot.adapters import db
 from thermabot.adapters.ha_rest import MIRROR_ENTITY, HAError, HARest, WriteRefused, _call_service
+from thermabot.app.units import c_to_f_exact, delta_c_to_f, temperature_scale
 from thermabot.config import Settings
 from thermabot.core import safety, statemachine
-from thermabot.core.discovery import summarise
+from thermabot.core.fallback import choose_hold_mode
 from thermabot.core.guards import GuardCtx, WriteRecord, evaluate, readable
 from thermabot.core.overrides import OVERRIDE_COMMAND_STATES, override_command_key
 from thermabot.core.schedule import block_at, next_boundary
-from thermabot.core.types import Action, AlertEvent, Decision, OverrideIn, PlanStep, Snapshot
+from thermabot.core.types import (
+    Action,
+    AlertEvent,
+    Decision,
+    OverrideIn,
+    PlanStep,
+    Snapshot,
+    ThermostatState,
+)
 
 log = logging.getLogger(__name__)
 RETRY_AFTER_S = 120.0
@@ -80,6 +89,77 @@ def _iso(t: datetime) -> str:
     return t.astimezone(UTC).isoformat()
 
 
+def _num(v: Any) -> float | None:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def thermostat(st: dict[str, Any], read_at: datetime | None = None) -> ThermostatState:
+    """HA climate state → internal °F. °C readings and ranges are converted exactly.
+
+    An unknown temperature unit clears every temperature (current, setpoints, range
+    and step) and is logged. Safety then has nothing to compare, and the device
+    check refuses the write instead of treating Celsius as Fahrenheit.
+    """
+    a = st.get("attributes", {})
+    mode = str(st.get("state"))
+    if read_at is not None and mode not in ("unavailable", "unknown", "", "None"):
+        seen: datetime | None = read_at
+    else:
+        seen = parse_last_reported(st)
+    single_sp = _num(a.get("temperature"))
+    modes = a.get("hvac_modes")
+    unit = str(a.get("temperature_unit") or a.get("unit_of_measurement") or "") or None
+    scale = temperature_scale(unit)
+    current = _num(a.get("current_temperature"))
+    heat = (
+        single_sp
+        if mode.lower() == "heat" and single_sp is not None
+        else _num(a.get("target_temp_low"))
+    )
+    cool = (
+        single_sp
+        if mode.lower() == "cool" and single_sp is not None
+        else _num(a.get("target_temp_high"))
+    )
+    min_temp = _num(a.get("min_temp"))
+    max_temp = _num(a.get("max_temp"))
+    step = _num(a.get("target_temp_step"))
+    if scale is None:
+        log.warning(
+            "thermostat temperature unit %r is unknown; temperatures cleared and writes blocked",
+            unit,
+        )
+        current = heat = cool = min_temp = max_temp = step = None
+    elif scale == "C":
+        current = None if current is None else c_to_f_exact(current)
+        heat = None if heat is None else c_to_f_exact(heat)
+        cool = None if cool is None else c_to_f_exact(cool)
+        min_temp = None if min_temp is None else c_to_f_exact(min_temp)
+        max_temp = None if max_temp is None else c_to_f_exact(max_temp)
+        step = None if step is None else delta_c_to_f(step)
+    return ThermostatState(
+        hvac_mode=mode,
+        hvac_modes=[v.lower() for v in modes if isinstance(v, str)]
+        if isinstance(modes, list)
+        else [],
+        hvac_action=a.get("hvac_action"),
+        current_temp=current,
+        heat_sp=heat,
+        cool_sp=cool,
+        min_temp=min_temp,
+        max_temp=max_temp,
+        target_temp_step=step,
+        temperature_unit=unit,
+        fan_mode=a.get("fan_mode"),
+        preset_mode=a.get("preset_mode"),
+        humidity=_num(a.get("current_humidity")),
+        last_reported=seen,
+    )
+
+
 def diff(
     step: PlanStep, snap: Snapshot, entity_id: str, *, include_fan: bool = True
 ) -> list[Action]:
@@ -94,7 +174,7 @@ def diff(
                 Action(service="set_hvac_mode", entity_id=entity_id, data={"hvac_mode": "off"})
             )
     else:
-        if step.hvac_mode == "heat_cool":
+        if step.hvac_mode in ("heat_cool", "auto"):
             want = {"target_temp_low": step.heat_sp, "target_temp_high": step.cool_sp}
             have = {"target_temp_low": th.heat_sp, "target_temp_high": th.cool_sp}
         else:
@@ -133,6 +213,8 @@ def device_value(value: str, options: object) -> str:
 def _capability_error(
     minimum: float | None, maximum: float | None, step: float | None, unit: str | None
 ) -> str:
+    if temperature_scale(unit) is None:
+        return "thermostat temperature unit is unknown"
     if step is None or not isfinite(step) or step <= 0:
         return "thermostat setpoint step unavailable"
     if (
@@ -143,8 +225,6 @@ def _capability_error(
         or minimum >= maximum
     ):
         return "thermostat setpoint range unavailable"
-    if unit is not None and unit.casefold() not in ("f", "°f", "℉"):
-        return "thermostat temperature unit is not Fahrenheit"
     return ""
 
 
@@ -175,8 +255,95 @@ def _supported_setpoints(
     return True
 
 
-def _supported_mode(mode: object, modes: list[str]) -> bool:
-    return isinstance(mode, str) and mode.casefold() in {m.casefold() for m in modes}
+_SETPOINT_KEYS = ("temperature", "target_temp_low", "target_temp_high")
+
+
+def resolve_device_mode(mode: str, modes: list[str]) -> str | None:
+    """The device's spelling of `mode`, or auto↔heat_cool when only one is listed."""
+    listed = {m.casefold(): m for m in modes}
+    found = listed.get(mode.casefold())
+    if found is not None:
+        return found
+    if mode.casefold() == "heat_cool":
+        return listed.get("auto")
+    if mode.casefold() == "auto":
+        return listed.get("heat_cool")
+    return None
+
+
+def align_action(action: Action, th: ThermostatState) -> Action:
+    """Snap °C-device setpoints onto the device step. Values stay in °F.
+
+    °F devices are unchanged, including off-grid values the capability check rejects.
+    """
+    if temperature_scale(th.temperature_unit) != "C":
+        return action
+    if (
+        th.min_temp is None
+        or th.max_temp is None
+        or th.target_temp_step is None
+        or not isfinite(th.target_temp_step)
+        or th.target_temp_step <= 0
+    ):
+        return action
+    min_c = (Decimal(str(th.min_temp)) - Decimal(32)) * Decimal(5) / Decimal(9)
+    max_c = (Decimal(str(th.max_temp)) - Decimal(32)) * Decimal(5) / Decimal(9)
+    step_c = Decimal(str(th.target_temp_step)) * Decimal(5) / Decimal(9)
+    if step_c <= 0:
+        return action
+    data = dict(action.data)
+    changed = False
+    for key in _SETPOINT_KEYS:
+        raw = data.get(key)
+        if isinstance(raw, bool) or not isinstance(raw, int | float):
+            continue
+        native = (Decimal(str(float(raw))) - Decimal(32)) * Decimal(5) / Decimal(9)
+        units = ((native - min_c) / step_c).to_integral_value(rounding=ROUND_HALF_UP)
+        quantized = min(max(min_c + units * step_c, min_c), max_c)
+        data[key] = float(quantized * Decimal(9) / Decimal(5) + Decimal(32))
+        changed = True
+    return action.model_copy(update={"data": data}) if changed else action
+
+
+def apply_device_mode(action: Action, modes: list[str]) -> Action:
+    mode = action.data.get("hvac_mode")
+    if not isinstance(mode, str):
+        return action
+    resolved = resolve_device_mode(mode, modes)
+    if resolved is None or resolved == mode:
+        return action
+    return action.model_copy(update={"data": {**action.data, "hvac_mode": resolved}})
+
+
+def device_block_reason(action: Action, th: ThermostatState) -> str:
+    """Empty when this write matches a known unit, a supported mode and the device grid."""
+    if temperature_scale(th.temperature_unit) is None:
+        return "thermostat temperature unit is unknown"
+    mode = action.data.get("hvac_mode")
+    if isinstance(mode, str) and resolve_device_mode(mode, th.hvac_modes) is None:
+        return "thermostat does not report support for the requested HVAC mode"
+    if action.service == "set_temperature" or any(k in action.data for k in _SETPOINT_KEYS):
+        err = _capability_error(th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit)
+        if err:
+            return err
+        if not _supported_setpoints(
+            action, th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit
+        ):
+            return "setpoints incompatible with thermostat capabilities"
+    return ""
+
+
+def action_for_device(action: Action, unit: str | None) -> Action:
+    """Setpoints in the device's unit. Internal actions stay in °F."""
+    if temperature_scale(unit) != "C":
+        return action
+    data = dict(action.data)
+    for key in _SETPOINT_KEYS:
+        raw = data.get(key)
+        if isinstance(raw, bool) or not isinstance(raw, int | float):
+            continue
+        data[key] = float((Decimal(str(float(raw))) - Decimal(32)) * Decimal(5) / Decimal(9))
+    return action.model_copy(update={"data": data})
 
 
 def _setpoint_detail(data: Mapping[str, float | str | None]) -> str:
@@ -208,6 +375,8 @@ def readback_ok(
     if st is None:
         return False
     a = st.get("attributes", {})
+    raw_unit = a.get("temperature_unit") or a.get("unit_of_measurement")
+    scale = temperature_scale(raw_unit if isinstance(raw_unit, str) else None)
     for k, v in action.data.items():
         have = st.get("state") if k == "hvac_mode" else a.get(k)
         if k == "preset_mode":
@@ -218,8 +387,14 @@ def readback_ok(
                 or isinstance(have, bool)
                 or not isfinite(have)
                 or not isfinite(v)
-                or abs(float(have) - float(v)) > tolerance
             ):
+                return False
+            if k in _SETPOINT_KEYS:
+                if scale == "C":
+                    have = float(Decimal(str(have)) * Decimal(9) / Decimal(5) + Decimal(32))
+                elif scale != "F":
+                    return False
+            if abs(float(have) - float(v)) > tolerance:
                 return False
         elif str(have).lower() != str(v).lower():
             return False
@@ -350,7 +525,7 @@ class Controller:
             return override_id, None
 
         mode = override.mode or snap.thermostat.hvac_mode
-        if mode not in ("off", "heat", "cool", "heat_cool"):
+        if mode not in ("off", "heat", "cool", "heat_cool", "auto"):
             self._set_override_command(
                 override_id, "blocked", now, "thermostat mode unavailable", expected="pending"
             )
@@ -378,7 +553,7 @@ class Controller:
                 units = ((value - base) / increment).to_integral_value(rounding=rounding)
                 return float(base + units * increment)
 
-            if mode == "heat_cool":
+            if mode in ("heat_cool", "auto"):
                 half_deadband = Decimal(str(self.settings.writes.deadband_f)) / 2
                 heat_sp = rounded(desired - half_deadband, ROUND_FLOOR)
                 cool_sp = rounded(desired + half_deadband, ROUND_CEILING)
@@ -526,7 +701,7 @@ class Controller:
                 data: dict[str, float | str | None] = {}
                 if snap is not None:
                     th = snap.thermostat
-                    if th.hvac_mode == "heat_cool":
+                    if th.hvac_mode in ("heat_cool", "auto"):
                         data = {"target_temp_low": th.heat_sp, "target_temp_high": th.cool_sp}
                     elif th.hvac_mode in ("heat", "cool"):
                         data = {"temperature": th.heat_sp if th.hvac_mode == "heat" else th.cool_sp}
@@ -535,6 +710,15 @@ class Controller:
                 )
         out: list[Decision] = []
         for act in actions:
+            if snap is not None and act.service in ("set_hvac_mode", "set_temperature"):
+                act = apply_device_mode(
+                    align_action(act, snap.thermostat), snap.thermostat.hvac_modes
+                )
+            dev_min, dev_max = 50.0, 90.0
+            if snap is not None and snap.thermostat.min_temp is not None:
+                dev_min = snap.thermostat.min_temp
+            if snap is not None and snap.thermostat.max_temp is not None:
+                dev_max = snap.thermostat.max_temp
             ctx = GuardCtx(
                 kill_switch=None if persisted is None else persisted.kill_switch,
                 ha_mirror=live.ha_mirror,
@@ -547,6 +731,8 @@ class Controller:
                 settings=self.settings,
                 now=now,
                 safety_hold_until=self.hold_until,
+                device_min_f=dev_min,
+                device_max_f=dev_max,
                 **(guard_extra or {}),
             )
             d = evaluate(act, ctx)
@@ -565,42 +751,12 @@ class Controller:
                 )
             if (
                 d.allowed
-                and manual_override
-                and snap is not None
-                and any(
-                    k in d.action.data
-                    for k in ("temperature", "target_temp_low", "target_temp_high")
-                )
-            ):
-                th = snap.thermostat
-                if not _supported_setpoints(
-                    d.action, th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit
-                ):
-                    d = d.model_copy(
-                        update={
-                            "allowed": False,
-                            "would_write": False,
-                            "guard": "device",
-                            "reason": "setpoints incompatible with thermostat capabilities",
-                        }
-                    )
-            if (
-                d.allowed
-                and not manual_override
-                and not act.safety_restore
-                and self.settings.seasonal_control.enabled
                 and snap is not None
                 and d.action.service in ("set_hvac_mode", "set_temperature")
             ):
-                th = snap.thermostat
-                if not _supported_mode(d.action.data.get("hvac_mode"), th.hvac_modes):
-                    reason = "thermostat does not report support for the requested HVAC mode"
-                elif d.action.service == "set_temperature" and not _supported_setpoints(
-                    d.action, th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit
-                ):
-                    reason = "setpoints incompatible with thermostat capabilities"
-                else:
-                    reason = ""
+                # Every planned write, manual override and safety restore. Seasonal
+                # control being off does not skip the device's mode, range or unit.
+                reason = device_block_reason(d.action, snap.thermostat)
                 if reason:
                     d = d.model_copy(
                         update={
@@ -699,7 +855,7 @@ class Controller:
             if attempt == 2:
                 await self._sleep(RETRY_AFTER_S)
             try:
-                await self._send(act, override_id=override_id)
+                sent = await self._send(act, override_id=override_id)
             except (HAError, WriteRefused, httpx.HTTPError) as e:
                 log.error("write %s failed: %s", act.service, e)
                 return self._fail(d, now, step_t, f"adapter error: {type(e).__name__}")
@@ -708,9 +864,11 @@ class Controller:
                 self.settings.seasonal_control.enabled and not act.safety_restore
             )
             tolerance = OVERRIDE_READBACK_TOL_F if strict else READBACK_TOL_F
-            ok, ms = await self._readback(act, tolerance)
+            ok, ms = await self._readback(sent, tolerance)
             if ok:
-                self._record(d, "sent", now, readback=True, ms=ms)
+                self._record(
+                    d.model_copy(update={"action": sent}), "sent", now, readback=True, ms=ms
+                )
                 if act.service == "set_preset_mode":
                     self._mark_preset_cleared(now)
                 return True
@@ -723,44 +881,12 @@ class Controller:
         self,
         action: Action,
         override_id: int | None,
-        expected_mode: str | None = None,
         *,
         check_state: bool = True,
     ) -> None:
         if not check_state:
             return
         mirror = await self.ha.get_state(MIRROR_ENTITY)
-        has_setpoint = any(
-            k in action.data for k in ("temperature", "target_temp_low", "target_temp_high")
-        )
-        seasonal_plan = (
-            override_id is None
-            and self.settings.seasonal_control.enabled
-            and not action.safety_restore
-            and action.service in ("set_hvac_mode", "set_temperature")
-        )
-        if (override_id is not None and has_setpoint) or seasonal_plan:
-            state = await self.ha.get_state(action.entity_id)
-            if state is None:
-                raise WriteRefused("thermostat unavailable before mode or setpoint write")
-            device = summarise(state)
-            mode = expected_mode or action.data.get("hvac_mode")
-            if (
-                device.state.lower() in ("", "unknown", "unavailable")
-                or (expected_mode is not None and device.state.lower() != expected_mode.lower())
-                or (seasonal_plan and not _supported_mode(mode, device.hvac_modes))
-                or (
-                    has_setpoint
-                    and not _supported_setpoints(
-                        action,
-                        device.min_temp,
-                        device.max_temp,
-                        device.target_temp_step,
-                        device.temperature_unit,
-                    )
-                )
-            ):
-                raise WriteRefused("thermostat mode or setpoint capabilities changed")
         persisted = db.read_bot_state(self.conn)
         now = self._clock()
         if (
@@ -786,6 +912,30 @@ class Controller:
         ):
             raise WriteRefused("override no longer authorized")
 
+    async def _require_capabilities(
+        self, action: Action, expected_mode: str | None = None
+    ) -> tuple[Action, str | None]:
+        """Live mode, unit and setpoint check for every climate write, including restore.
+
+        Returns the action in °F (aligned to a °C step when needed) and the device unit.
+        """
+        st = await self.ha.get_state(action.entity_id)
+        if st is None:
+            raise WriteRefused("thermostat unavailable before mode or setpoint write")
+        th = thermostat(st)
+        if th.hvac_mode in ("", "unknown", "unavailable"):
+            raise WriteRefused("thermostat unavailable before mode or setpoint write")
+        if expected_mode is not None and th.hvac_mode.lower() != expected_mode.lower():
+            raise WriteRefused("thermostat mode or setpoint capabilities changed")
+        if action.service in ("set_hvac_mode", "set_temperature"):
+            action = apply_device_mode(align_action(action, th), th.hvac_modes)
+            reason = device_block_reason(action, th)
+            if reason:
+                raise WriteRefused(reason)
+        elif temperature_scale(th.temperature_unit) is None:
+            raise WriteRefused("thermostat temperature unit is unknown")
+        return action, th.temperature_unit
+
     async def _send(
         self,
         act: Action,
@@ -793,29 +943,37 @@ class Controller:
         *,
         override_id: int | None = None,
         check_state: bool = True,
-    ) -> None:
+    ) -> Action:
         """T1.44 (2026-10-05): the Trane ignores `hvac_mode` inside set_temperature when
         leaving OFF. A mode change is therefore always an explicit set_hvac_mode, confirmed by
-        read-back (bounded), followed by set_temperature with the setpoints only."""
+        read-back (bounded), followed by set_temperature with the setpoints only.
+
+        Returns the action that was sent, still in °F, so read-back can compare after the
+        device unit is converted back. Capability checks run even when `check_state` is
+        false (kill-switch restore skips the active-mode authorization, not the device).
+        """
         if act.service in ("set_fan_mode", "set_preset_mode"):
             key = "fan_mode" if act.service == "set_fan_mode" else "preset_mode"
             st0 = await self.ha.get_state(act.entity_id)
             opts = None if st0 is None else (st0.get("attributes") or {}).get(f"{key}s")
             val = str(act.data.get(key) or "none")
             act = act.model_copy(update={"data": {**act.data, key: device_value(val, opts)}})
-        mode = act.data.get("hvac_mode")
-        if act.service != "set_temperature" or not isinstance(mode, str):
-            await self._check_write(act, override_id, check_state=check_state)
-            await _call_service(self.ha, act)
-            return
-        st = await self.ha.get_state(act.entity_id)
+        prepared, unit = await self._require_capabilities(act)
+        mode = prepared.data.get("hvac_mode")
+        if prepared.service != "set_temperature" or not isinstance(mode, str):
+            await self._check_write(prepared, override_id, check_state=check_state)
+            await _call_service(self.ha, action_for_device(prepared, unit))
+            return prepared
+        st = await self.ha.get_state(prepared.entity_id)
         if st is None or str(st.get("state")).lower() != mode.lower():
-            m = Action(service="set_hvac_mode", entity_id=act.entity_id, data={"hvac_mode": mode})
-            await self._check_write(act, override_id, check_state=check_state)
+            m = Action(
+                service="set_hvac_mode", entity_id=prepared.entity_id, data={"hvac_mode": mode}
+            )
+            await self._check_write(prepared, override_id, check_state=check_state)
             await _call_service(self.ha, m)
             waited = 0.0
             while True:
-                st = await self.ha.get_state(act.entity_id)
+                st = await self.ha.get_state(prepared.entity_id)
                 if st is not None and str(st.get("state")).lower() == mode.lower():
                     break
                 if waited >= mode_wait_s:
@@ -823,11 +981,16 @@ class Controller:
                 delay = min(MODE_POLL_S, mode_wait_s - waited)
                 await self._sleep(delay)
                 waited += delay
-        sps = {k: v for k, v in act.data.items() if k != "hvac_mode"}
+        sps = {k: v for k, v in prepared.data.items() if k != "hvac_mode"}
         if sps:
-            setpoint_action = act.model_copy(update={"data": sps})
-            await self._check_write(setpoint_action, override_id, mode, check_state=check_state)
-            await _call_service(self.ha, setpoint_action)
+            setpoint_action = prepared.model_copy(update={"data": sps})
+            setpoint_action, unit = await self._require_capabilities(setpoint_action, str(mode))
+            await self._check_write(setpoint_action, override_id, check_state=check_state)
+            await _call_service(self.ha, action_for_device(setpoint_action, unit))
+            prepared = prepared.model_copy(
+                update={"data": {**prepared.data, **setpoint_action.data}}
+            )
+        return prepared
 
     def _fail(self, d: Decision, now: datetime, step_t: datetime | None, why: str) -> bool:
         self._record(d.model_copy(update={"reason": why}), "failed", now, readback=False)
@@ -866,20 +1029,28 @@ class Controller:
             return "failed"
         if st.get("state") != "off":
             return "not_needed"
+        th = thermostat(st)
+        if temperature_scale(th.temperature_unit) is None:
+            log.warning("kill restore not attempted: thermostat temperature unit is unknown")
+            return "failed"
         b = self.settings.bands
+        lo, hi = float(b.heat.home[0]), float(b.cool.home[1])
+        choice = choose_hold_mode(th.hvac_modes, lo, hi, th.current_temp)
+        data = None if choice is None else safety._restore_data(*choice)
+        if data is None:
+            log.warning("kill restore not attempted: thermostat has no supported hold mode")
+            return "failed"
         act = Action(
             service="set_temperature",
             entity_id=self.entity,
             safety_restore=True,
-            data={
-                "hvac_mode": "heat_cool",
-                "target_temp_low": b.heat.home[0],
-                "target_temp_high": b.cool.home[1],
-            },
+            data=data,
         )
         d = Decision(t=now, action=act, allowed=True, reason="kill switch: restore to band")
         try:
-            await asyncio.wait_for(
+            # check_state stays false: this is the one write allowed while disabling,
+            # including from SHADOW. Capability checks still run inside _send.
+            sent = await asyncio.wait_for(
                 self._send(act, mode_wait_s=timeout_s / 4, check_state=False), timeout_s / 2
             )
             back = await asyncio.wait_for(self.ha.get_state(self.entity), timeout_s / 4)
@@ -891,8 +1062,10 @@ class Controller:
                 readback=False,
             )
             return "failed"
-        ok = readback_ok(act, back)
-        self._record(d, "sent" if ok else "failed", now, readback=ok)
+        ok = readback_ok(sent, back)
+        self._record(
+            d.model_copy(update={"action": sent}), "sent" if ok else "failed", now, readback=ok
+        )
         if ok:
             self._last_send = now
         return "sent" if ok else "failed"

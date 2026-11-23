@@ -22,7 +22,7 @@ jobs:
       - run: pip install --require-hashes -r requirements.lock
       - run: ruff check .
       - run: ruff format --check .
-      - run: mypy --strict thermabot/core
+      - run: mypy --strict thermabot
       # v0.6.1: unit + integration must also collect together (no test-module basename clash)
       - run: python -m pytest --collect-only -q tests/unit tests/integration
 

@@ -85,12 +85,17 @@ async def test_killed_mid_precondition_leaves_livable_setpoint(
     )
     th = ThermostatState(
         hvac_mode="heat_cool",
+        hvac_modes=["off", "heat", "cool", "heat_cool"],
         current_temp=71,
         heat_sp=68,
         cool_sp=76,
         fan_mode="auto",
         preset_mode="none",
         last_reported=NOW,
+        min_temp=45,
+        max_temp=95,
+        target_temp_step=1,
+        temperature_unit="°F",
     )
     step = PlanStep(t=NOW, hvac_mode="heat_cool", heat_sp=lo, cool_sp=hi)
     await c.tick(Snapshot(t=NOW, thermostat=th), step, Live(ha_mirror="on", tstat_age_min=0), NOW)

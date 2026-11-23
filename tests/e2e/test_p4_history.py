@@ -10,14 +10,14 @@ from playwright.sync_api import Browser, Page, expect
 from tests.e2e.conftest import Srv, assert_page_healthy, capture_chart_labels, login
 from thermabot.adapters import db
 from thermabot.app.routes_ui import SUMMARY_KEY
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.types import SavingsOut
 
 
 def _seed(srv: Srv, n: int) -> None:
     now = srv.ctx.clock()
     srv.ctx.clock = lambda: now
-    today = now.astimezone(TZ).date()
+    today = now.astimezone(active_zone()).date()
     for i in range(n):
         srv.ctx.conn.execute(
             "INSERT INTO daily_metrics (day, heat_min, cool_min, fan_only_min, hdd, cdd,"

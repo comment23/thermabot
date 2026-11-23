@@ -28,7 +28,7 @@ from thermabot.app.auth import COOKIE, FIRST_RUN_COOKIE, FIRST_RUN_TTL, MIN_PW, 
 from thermabot.app.routes_api import Ctx, ctx_of, load_settings
 from thermabot.core import statemachine as sm
 from thermabot.core.overrides import nudge_active, nudges_today
-from thermabot.core.schedule import TZ, block_at
+from thermabot.core.schedule import active_zone, block_at
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
@@ -57,7 +57,7 @@ def localtime(t: datetime | str | None, fmt: str = "%a %H:%M") -> str:
         return "—"
     if isinstance(t, str):
         t = datetime.fromisoformat(t)
-    return t.astimezone(TZ).strftime(fmt)
+    return t.astimezone(active_zone()).strftime(fmt)
 
 
 templates.env.filters["localtime"] = localtime
@@ -118,7 +118,7 @@ def render(
         "path": request.url.path.removeprefix(request.scope.get("root_path", "")) or "/",
         "charts": charts,
         "now": c.clock(),
-        "timezone": TZ.key,
+        "timezone": active_zone().key,
         "restart_needed": p is not None
         and p.can("edit_comfort")
         and saved != (c.running_entity or ""),
@@ -163,7 +163,7 @@ async def first_run_page(request: Request, c: CtxD) -> Response:
         token,
         max_age=int(FIRST_RUN_TTL.total_seconds()),
         httponly=True,
-        secure=request.url.scheme == "https",
+        secure=api.cookie_secure(request),
         samesite="strict",
         path=request.scope.get("root_path") or "/",
     )
@@ -346,7 +346,9 @@ def savings_chart(s: dict[str, Any]) -> dict[str, Any] | None:
     if not days:
         return None
     return {
-        "t": [datetime.fromisoformat(d["day"]).replace(tzinfo=TZ).timestamp() for d in days],
+        "t": [
+            datetime.fromisoformat(d["day"]).replace(tzinfo=active_zone()).timestamp() for d in days
+        ],
         "day": [d["day"] for d in days],
         "saved": [d["saved_min"] for d in days],
         "cum": [d["cum_saved_min"] for d in days],
@@ -418,13 +420,15 @@ async def history_page(
 ) -> Response:
     """P4: daily metrics table + runtime chart + savings + latest weekly summary (D§12.3)."""
     days = max(1, min(days, 400))
-    since = (c.clock().astimezone(TZ).date() - timedelta(days=days)).isoformat()
+    since = (c.clock().astimezone(active_zone()).date() - timedelta(days=days)).isoformat()
     rows = [
         dict(r)
         for r in c.conn.execute("SELECT * FROM daily_metrics WHERE day >= ? ORDER BY day", (since,))
     ]
     data = {
-        "t": [datetime.fromisoformat(r["day"]).replace(tzinfo=TZ).timestamp() for r in rows],
+        "t": [
+            datetime.fromisoformat(r["day"]).replace(tzinfo=active_zone()).timestamp() for r in rows
+        ],
         "heat": [(r["heat_min"] or 0) / 60 for r in rows],
         "cool": [(r["cool_min"] or 0) / 60 for r in rows],
     }

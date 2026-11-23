@@ -42,10 +42,14 @@ def test_app_starts_kill_off_heartbeat_no_climate_calls(tmp_path: Path) -> None:
     ha = MockHA()
     app = create_app(load_env(env(tmp_path)), ha_transport=httpx.ASGITransport(app=ha.app))
     with TestClient(app) as c:
-        deadline = time.monotonic() + 5
-        while not ha.webhook_posts and time.monotonic() < deadline:
-            time.sleep(0.02)
+        deadline = time.monotonic() + 20
         r = c.get("/healthz")
+        # The first probe can land before the startup replan finishes. That is
+        # "starting", not a stale 503. Wait until the first tick reports DISABLED.
+        while r.json().get("state") == "starting" and time.monotonic() < deadline:
+            assert r.status_code == 200, r.text
+            time.sleep(0.05)
+            r = c.get("/healthz")
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "DISABLED"
     beats = [p["body"] for p in ha.webhook_posts]

@@ -20,7 +20,7 @@ from thermabot.app.main import Runtime, build, load_env
 from thermabot.app.routes_api import _kv_put
 from thermabot.config import OpeningPolicyCfg
 from thermabot.core import planner
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.thermal import ThermalParams, step
 from thermabot.core.types import Forecast, ForecastPoint, Plan, PlanStep
 
@@ -318,7 +318,7 @@ def history(
         )
     }
     while t <= end:
-        lt = t.astimezone(TZ)
+        lt = t.astimezone(active_zone())
         hour = lt.hour + lt.minute / 60
         to = t_out(hour)
         heating = temp < 68 or (heating and temp < 70)
@@ -425,9 +425,11 @@ async def test_refit_excludes_override_steps(tmp_path: Path) -> None:
 
 # ---- rollup --------------------------------------------------------------------------
 def day_data(d: date, heat: tuple[int, int], cs_pct: float = 0) -> Data:
-    start = datetime(d.year, d.month, d.day, tzinfo=TZ).astimezone(UTC)
+    start = datetime(d.year, d.month, d.day, tzinfo=active_zone()).astimezone(UTC)
     nxt = d + timedelta(days=1)
-    end = datetime(nxt.year, nxt.month, nxt.day, tzinfo=TZ).astimezone(UTC)  # 23/25 h on DST
+    end = datetime(nxt.year, nxt.month, nxt.day, tzinfo=active_zone()).astimezone(
+        UTC
+    )  # 23/25 h on DST
     out: Data = {
         ("living_room", "hvac_action_str"): [],
         ("living_room_blower_active", "value"): [],
@@ -436,7 +438,7 @@ def day_data(d: date, heat: tuple[int, int], cs_pct: float = 0) -> Data:
     }
     t = start - timedelta(minutes=10)
     while t < end:
-        h = t.astimezone(TZ).hour if t >= start else -1
+        h = t.astimezone(active_zone()).hour if t >= start else -1
         on = heat[0] <= h < heat[1]
         out[("living_room", "hvac_action_str")].append((t, "heating" if on else "idle"))
         out[("living_room_blower_active", "value")].append((t, 1 if on else 0))
@@ -467,7 +469,7 @@ def test_minute_samples_cover_exact_local_day(day: date, minutes: int) -> None:
 
 @pytest.mark.brd("FR-MET-1")
 async def test_rollup_writes_yesterday_daily_metrics(tmp_path: Path) -> None:
-    now = datetime(2026, 10, 5, 0, 5, tzinfo=TZ)
+    now = datetime(2026, 10, 5, 0, 5, tzinfo=active_zone())
     rt = rt_of(
         tmp_path,
         Clock(now),
@@ -491,7 +493,7 @@ async def test_rollup_writes_yesterday_daily_metrics(tmp_path: Path) -> None:
 
 @pytest.mark.brd("FR-MET-1")
 async def test_rollup_dst_day_and_rerun_idempotent(tmp_path: Path) -> None:
-    now = datetime(2026, 11, 2, 0, 5, tzinfo=TZ)  # yesterday = 25-hour DST day
+    now = datetime(2026, 11, 2, 0, 5, tzinfo=active_zone())  # yesterday = 25-hour DST day
     rt = rt_of(
         tmp_path,
         Clock(now),
@@ -507,7 +509,7 @@ async def test_rollup_dst_day_and_rerun_idempotent(tmp_path: Path) -> None:
 
 @pytest.mark.brd("FR-MET-1")
 async def test_rollup_without_influx_writes_null_metrics(tmp_path: Path) -> None:
-    now = datetime(2026, 10, 5, 0, 5, tzinfo=TZ)
+    now = datetime(2026, 10, 5, 0, 5, tzinfo=active_zone())
     rt = rt_of(tmp_path, Clock(now))
     await rt.rollup(now)
     r = dict(rt.conn.execute("SELECT * FROM daily_metrics").fetchone())
@@ -518,7 +520,7 @@ async def test_rollup_without_influx_writes_null_metrics(tmp_path: Path) -> None
 @pytest.mark.brd("NFR-REL-2")
 async def test_failing_background_jobs_never_stop_tick_or_heartbeat(tmp_path: Path) -> None:
     """Influx down at 00:05/03:15 and NWS down: every tick and heartbeat still runs."""
-    clk = Clock(datetime(2026, 10, 5, 0, 0, tzinfo=TZ))
+    clk = Clock(datetime(2026, 10, 5, 0, 0, tzinfo=active_zone()))
     ha = MockHA()
     down = httpx.MockTransport(lambda r: httpx.Response(503))
     rt = rt_of(tmp_path, clk, ha=ha, nws=down, influx=down, INFLUX_READ_TOKEN="r")

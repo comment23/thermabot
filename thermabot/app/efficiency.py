@@ -28,7 +28,7 @@ from thermabot.app.jobs import (
 from thermabot.core.efficiency import EffDay, ShadowIn, hourly_degree_days, summarize
 from thermabot.core.metrics import MinuteSample
 from thermabot.core.metrics import runtime as day_runtime
-from thermabot.core.schedule import TZ
+from thermabot.core.schedule import active_zone
 from thermabot.core.shadow import MinuteRow
 
 log = logging.getLogger(__name__)
@@ -79,7 +79,11 @@ def day_row(rows: Sequence[MinuteRow], day_minutes: int, base_f: float = 65.0) -
     for r in rows:
         if r.t_out is not None:
             # UTC keys distinguish the two occurrences of a repeated local hour.
-            h = r.t.astimezone(TZ).replace(minute=0, second=0, microsecond=0).astimezone(UTC)
+            h = (
+                r.t.astimezone(active_zone())
+                .replace(minute=0, second=0, microsecond=0)
+                .astimezone(UTC)
+            )
             hours.setdefault(h, []).append(r.t_out)
     dd = hourly_degree_days([sum(v) / len(v) for _, v in sorted(hours.items())], base_f)
     rt = (
@@ -133,8 +137,8 @@ def missing_days(conn: sqlite3.Connection, now: datetime) -> list[date]:
     r = conn.execute("SELECT MIN(ts) FROM samples").fetchone()
     if r is None or r[0] is None:
         return []
-    first = datetime.fromisoformat(r[0]).astimezone(TZ).date()
-    today = now.astimezone(TZ).date()
+    first = datetime.fromisoformat(r[0]).astimezone(active_zone()).date()
+    today = now.astimezone(active_zone()).date()
     have = {x[0] for x in conn.execute("SELECT day FROM efficiency_daily")}
     out: list[date] = []
     d = max(first, today - SAMPLE_RETENTION)
@@ -230,7 +234,7 @@ def _shadow(conn: sqlite3.Connection, since: str) -> list[ShadowIn]:
 
 def report(conn: sqlite3.Connection, now: datetime, days: int = 365) -> dict[str, Any]:
     """Everything GET /api/efficiency and the Efficiency page show. Read-only."""
-    since = (now.astimezone(TZ) - timedelta(days=days)).date().isoformat()
+    since = (now.astimezone(active_zone()) - timedelta(days=days)).date().isoformat()
     out = summarize(_eff_days(conn, since), _shadow(conn, since)).model_dump(mode="json")
     out["method"] = METHOD
     return out

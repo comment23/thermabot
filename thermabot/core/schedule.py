@@ -1,19 +1,47 @@
 """Weekly schedule -> active block at time t, next boundary, season (D§5.2, D§8.5, FR-CMF-2).
 
-Pure: `now` is passed in. Wall-clock evaluation in America/New_York, so DST days have
-23 or 25 hours but blocks still start at their local times.
+Pure: `now` is passed in. Wall-clock evaluation uses `active_zone()` (Env.TZ, else Home
+Assistant's configured time_zone, else UTC). DST days have 23 or 25 hours but blocks
+still start at their local times. The zone is America/New_York until `configure_timezone`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from thermabot.config import BlockName, BlockStart, ScheduleCfg, SeasonCfg
 from thermabot.core.types import Forecast, Season
 
-TZ = ZoneInfo("America/New_York")
+_ZONE = ZoneInfo("America/New_York")
+
+
+def active_zone() -> ZoneInfo:
+    """Zone for schedules, rate-limit days and other local calendar boundaries."""
+    return _ZONE
+
+
+def configure_timezone(configured: str | None, ha_time_zone: str | None = None) -> ZoneInfo:
+    """Use `configured` (Env.TZ) when it names a zone, else HA's time_zone, else UTC.
+
+    Empty and unknown names are skipped. Returns the zone now in effect.
+    """
+    global _ZONE
+    for candidate in (configured, ha_time_zone, "UTC"):
+        if candidate is None:
+            continue
+        text = candidate.strip()
+        if not text:
+            continue
+        try:
+            _ZONE = ZoneInfo(text)
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+        else:
+            return _ZONE
+    _ZONE = ZoneInfo("UTC")
+    return _ZONE
 
 
 def _day_list(cfg: ScheduleCfg, d: datetime) -> list[BlockStart]:
@@ -28,7 +56,7 @@ def _start(b: BlockStart) -> time:
 def _require_aware(t: datetime) -> datetime:
     if t.tzinfo is None:
         raise ValueError("naive datetime; core requires aware times")
-    return t.astimezone(TZ)
+    return t.astimezone(active_zone())
 
 
 def block_at(cfg: ScheduleCfg, t: datetime) -> BlockName:
@@ -47,9 +75,9 @@ def next_boundary(cfg: ScheduleCfg, t: datetime) -> datetime:
     lt = _require_aware(t)
     for offset in range(8):
         day = (lt + timedelta(days=offset)).date()
-        dl = _day_list(cfg, datetime(day.year, day.month, day.day, tzinfo=TZ))
+        dl = _day_list(cfg, datetime(day.year, day.month, day.day, tzinfo=active_zone()))
         for b in dl:
-            cand = datetime.combine(day, _start(b), tzinfo=TZ)
+            cand = datetime.combine(day, _start(b), tzinfo=active_zone())
             if cand > lt:
                 return cand
     raise AssertionError("schedule has no blocks")  # unreachable: validator requires blocks

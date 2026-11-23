@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-HvacMode = Literal["off", "heat", "cool", "heat_cool"]
+HvacMode = Literal["off", "heat", "cool", "heat_cool", "auto"]
 FanMode = Literal["auto", "on"]
 Block = Literal["home", "sleep", "away"]
 Season = Literal["heat", "cool", "shoulder"]

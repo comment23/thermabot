@@ -408,7 +408,14 @@ def test_single_mode_plan_passes_existing_write_guards(
 def test_safety_restore_keeps_three_degree_deadband() -> None:
     now = local(2026, 11, 10, 23)
     snapshot = Snapshot(
-        t=now, thermostat=ThermostatState(hvac_mode="off", current_temp=61, last_reported=now)
+        t=now,
+        thermostat=ThermostatState(
+            hvac_mode="off",
+            hvac_modes=["off", "heat", "cool", "heat_cool"],
+            current_temp=61,
+            last_reported=now,
+            temperature_unit="°F",
+        ),
     )
     result = check(snapshot, seasonal_settings(), "sleep", now)
     assert result is not None

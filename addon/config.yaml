@@ -6,11 +6,13 @@ description: >-
   SHADOW (zero writes to your thermostat), review its plan, then switch it on. See
   https://github.com/comment23/thermabot for the full README and config reference.
 url: https://github.com/comment23/thermabot
-# amd64 only for now: the published ghcr.io/comment23/thermabot-dev images are amd64-only
-# (no multi-arch buildx yet, deferred to a later stage 6 follow-up). Add aarch64 here once a
-# multi-arch thermabot-dev/thermabot image exists and this add-on image is built for it too.
+# amd64 and aarch64. The add-on Dockerfile is architecture-neutral (no amd64-only
+# binaries). Supervisor builds one image per entry. The tagged ghcr.io/comment23/thermabot-dev
+# image stays amd64: this repo's Actions allowlist does not include docker/setup-qemu-action,
+# so CI cannot cross-build arm64. See README.
 arch:
   - amd64
+  - aarch64
 init: false
 startup: application
 boot: auto
@@ -31,6 +33,7 @@ map:
 ports: {}
 options:
   log_level: info
+  timezone: ""
   sensor_blower: ""
   sensor_compressor: ""
   sensor_outdoor: ""
@@ -48,6 +51,8 @@ options:
   ha_token: ""
 schema:
   log_level: list(debug|info|warning|error)
+  # Empty follows Home Assistant's configured time_zone, then UTC.
+  timezone: str?
   # Optional HVAC sensors (v0.6.1 one-time env seed; THERMABOT_SENSOR_*). The thermostat
   # entity itself, rooms, bands, schedule and people are still set in the in-app setup
   # wizard/Settings page (unchanged, already ingress-friendly) - not duplicated here.

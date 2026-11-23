@@ -5,14 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Literal
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
 from thermabot.config import NudgeCfg, OverrideDuration, ScheduleCfg
-from thermabot.core.schedule import next_boundary
+from thermabot.core.schedule import active_zone, next_boundary
 
-TZ = ZoneInfo("America/New_York")
 Role = Literal["owner", "admin", "member", "viewer"]
 
 _HOURS = {"1h": 1, "2h": 2, "4h": 4}
@@ -96,10 +94,12 @@ def nudge_active(n: Nudge, now: datetime) -> bool:
 
 
 def nudges_today(nudges: Sequence[Nudge], user_id: int, now: datetime) -> int:
-    """Nudges created by user on the current local (America/New_York) day."""
-    day = now.astimezone(TZ).date()
+    """Nudges created by user on the current local (`active_zone`) day."""
+    day = now.astimezone(active_zone()).date()
     return sum(
-        1 for n in nudges if n.user_id == user_id and n.created_at.astimezone(TZ).date() == day
+        1
+        for n in nudges
+        if n.user_id == user_id and n.created_at.astimezone(active_zone()).date() == day
     )
 
 

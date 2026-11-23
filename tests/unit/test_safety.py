@@ -38,7 +38,13 @@ def snap(
     house: HouseState | None = None,
 ) -> Snapshot:
     th = ThermostatState(
-        hvac_mode=mode, current_temp=temp, heat_sp=lo, cool_sp=hi, last_reported=NOW
+        hvac_mode=mode,
+        hvac_modes=["off", "heat", "cool", "heat_cool"],
+        current_temp=temp,
+        heat_sp=lo,
+        cool_sp=hi,
+        last_reported=NOW,
+        temperature_unit="°F",
     )
     pres = Presence(house=house, since=NOW) if house else None
     return Snapshot(t=NOW, thermostat=th, rooms=rooms or {}, presence=pres)

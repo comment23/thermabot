@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from thermabot.app.loops import HEARTBEAT_ENTITY, TICK_S, Jobs, Loops
-from thermabot.core.summary import TZ
+from thermabot.core.schedule import active_zone
 
 
 class Clock:
@@ -82,7 +82,7 @@ async def test_replan_hourly_at_05_and_on_trigger() -> None:
     rp = Rec()
     lp, clk, _ = make(datetime(2026, 10, 5, 16, 0, tzinfo=UTC), replan=rp)
     await run_for(lp, clk, 180)
-    local = [c.astimezone(TZ) for c in rp.calls]
+    local = [c.astimezone(active_zone()) for c in rp.calls]
     assert local[0].minute == 0  # start-up replan
     assert [t.minute for t in local[1:]] == [5, 5, 5]
     lp.trigger_replan()
@@ -93,14 +93,23 @@ async def test_replan_hourly_at_05_and_on_trigger() -> None:
 @pytest.mark.brd("FR-MODEL-2")
 async def test_refit_rollup_backup_once_per_night() -> None:
     refit, rollup, backup, rp = Rec(), Rec(), Rec(), Rec()
-    start = datetime(2026, 10, 5, 22, 0, tzinfo=TZ)
+    start = datetime(2026, 10, 5, 22, 0, tzinfo=active_zone())
     lp, clk, _ = make(start, refit=refit, rollup=rollup, backup=backup, replan=rp)
     await run_for(lp, clk, 48 * 60)
-    assert [c.astimezone(TZ).strftime("%H:%M") for c in refit.calls] == ["03:15", "03:15"]
-    assert [c.astimezone(TZ).strftime("%H:%M") for c in rollup.calls] == ["00:05", "00:05"]
-    assert [c.astimezone(TZ).strftime("%H:%M") for c in backup.calls] == ["03:30", "03:30"]
+    assert [c.astimezone(active_zone()).strftime("%H:%M") for c in refit.calls] == [
+        "03:15",
+        "03:15",
+    ]
+    assert [c.astimezone(active_zone()).strftime("%H:%M") for c in rollup.calls] == [
+        "00:05",
+        "00:05",
+    ]
+    assert [c.astimezone(active_zone()).strftime("%H:%M") for c in backup.calls] == [
+        "03:30",
+        "03:30",
+    ]
     # refit -> replan on the next tick
-    assert any(c.astimezone(TZ).strftime("%H:%M") == "03:16" for c in rp.calls)
+    assert any(c.astimezone(active_zone()).strftime("%H:%M") == "03:16" for c in rp.calls)
 
 
 @pytest.mark.brd("FR-SUM-1")
@@ -109,17 +118,19 @@ async def test_refit_rollup_backup_once_per_night() -> None:
 )
 async def test_summary_once_at_1800_et_across_dst(sunday: datetime) -> None:
     summ = Rec()
-    start = datetime(sunday.year, sunday.month, sunday.day, tzinfo=TZ) - timedelta(days=1)
+    start = datetime(sunday.year, sunday.month, sunday.day, tzinfo=active_zone()) - timedelta(
+        days=1
+    )
     lp, clk, _ = make(start, summary=summ)
     await run_for(lp, clk, 3 * 24 * 60)
-    assert [c.astimezone(TZ).strftime("%a %H:%M") for c in summ.calls] == ["Sun 18:00"]
+    assert [c.astimezone(active_zone()).strftime("%a %H:%M") for c in summ.calls] == ["Sun 18:00"]
 
 
 @pytest.mark.brd("FR-SUM-1")
 @pytest.mark.parametrize(("late_h", "sent"), [(1, True), (5.9, True), (6.5, False)])
 async def test_summary_late_send_rule(late_h: float, sent: bool) -> None:
     summ = Rec()
-    start = datetime(2026, 10, 4, 18, 0, tzinfo=TZ) + timedelta(hours=late_h)
+    start = datetime(2026, 10, 4, 18, 0, tzinfo=active_zone()) + timedelta(hours=late_h)
     lp, clk, _ = make(start, summary=summ)
     await run_for(lp, clk, 3)
     assert len(summ.calls) == (1 if sent else 0)
@@ -128,7 +139,7 @@ async def test_summary_late_send_rule(late_h: float, sent: bool) -> None:
 @pytest.mark.brd("FR-SUM-1")
 async def test_summary_not_resent_after_restart_same_slot() -> None:
     summ = Rec()
-    start = datetime(2026, 10, 4, 18, 30, tzinfo=TZ)
+    start = datetime(2026, 10, 4, 18, 30, tzinfo=active_zone())
     lp, clk, _ = make(start, summary=summ)
     await run_for(lp, clk, 2)
     slot = lp.last_summary_slot
@@ -169,11 +180,15 @@ async def test_summary_slot_persisted_across_restart(tmp_path: object) -> None:
 
     path = tmp_path / "t.db"  # type: ignore[operator]
     summ = Rec()
-    lp, clk, _ = _persisted(datetime(2026, 10, 4, 17, 58, tzinfo=TZ), db.open_db(path), summ)
+    lp, clk, _ = _persisted(
+        datetime(2026, 10, 4, 17, 58, tzinfo=active_zone()), db.open_db(path), summ
+    )
     await run_for(lp, clk, 5)
-    assert [c.astimezone(TZ).strftime("%a %H:%M") for c in summ.calls] == ["Sun 18:00"]
+    assert [c.astimezone(active_zone()).strftime("%a %H:%M") for c in summ.calls] == ["Sun 18:00"]
     # process restart at 18:30: fresh Loops, fresh connection, no in-memory state
-    lp2, clk2, _ = _persisted(datetime(2026, 10, 4, 18, 30, tzinfo=TZ), db.open_db(path), summ)
+    lp2, clk2, _ = _persisted(
+        datetime(2026, 10, 4, 18, 30, tzinfo=active_zone()), db.open_db(path), summ
+    )
     await run_for(lp2, clk2, 3)
     assert len(summ.calls) == 1
 
@@ -189,7 +204,7 @@ async def test_missed_summary_after_restart_6h_rule(
     summ = Rec()
     conn = db.open_db(tmp_path / "t.db")  # type: ignore[operator]
     mo, d, h, m = restart
-    lp, clk, _ = _persisted(datetime(2026, mo, d, h, m, tzinfo=TZ), conn, summ)
+    lp, clk, _ = _persisted(datetime(2026, mo, d, h, m, tzinfo=active_zone()), conn, summ)
     await run_for(lp, clk, 3)
     assert len(summ.calls) == (1 if sent else 0)
     lp2, clk2, _ = _persisted(clk.t, db.open_db(tmp_path / "t.db"), summ)  # type: ignore[operator]
