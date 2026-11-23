@@ -39,6 +39,7 @@ def test_ci_workflow_has_all_jobs() -> None:
         and "gitleaks" in sec
         and "trivy" in sec
         and "addon/Dockerfile" in sec
+        and "check_addon_startup.sh" in sec
     )
     gl = " ".join(str(s) for s in jobs["gitleaks"]["steps"])
     assert "gitleaks dir ." in gl and "sha256sum -c" in gl and "--exit-code 1" in gl
@@ -75,6 +76,7 @@ def test_addon_publish_uses_native_runners_and_config_version() -> None:
     assert "docker build addon" not in steps
     assert 'check_addon_config.py --arch "${{ matrix.arch }}" --github-output' in steps
     assert "--set-public --require-public" in steps
+    assert "check_addon_startup.sh" in steps
     assert publish["permissions"]["packages"] == "write"
     resolve = jobs["addon-image-resolve"]
     assert resolve["needs"] == "addon-publish"

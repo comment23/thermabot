@@ -1,8 +1,12 @@
-#!/usr/bin/env sh
-# HA add-on entrypoint (stage 6). Maps Supervisor's add-on options (/data/options.json) to
-# the env vars thermabot/config.py already reads, then execs the SAME app as the plain-Docker
-# image (uvicorn thermabot.app.main:app). DATA_DIR=/data is HA's add-on data volume, same role
-# as the ./data bind mount in deploy/docker-compose.yml.
+#!/command/with-contenv sh
+# HA add-on entrypoint. Maps Supervisor's add-on options (/data/options.json) to the env
+# vars thermabot/config.py already reads, then execs the same app as the plain-Docker image.
+# DATA_DIR=/data is HA's add-on data volume.
+#
+# The hassio base image runs this file as the s6 CMD (entrypoint /init). s6-overlay 3.2
+# keeps S6_KEEP_ENV at 0, so a `#!/usr/bin/env sh` script does not see SUPERVISOR_TOKEN
+# even though the token is in /run/s6/container_environment. with-contenv copies that
+# directory into this process. The base image's own services use the same shebang.
 set -e
 
 python3 /app/options_to_env.py
