@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.house import TSTAT, seed_house
 from tests.integration.mock_ha import GOOD_TOKEN, MockHA
 from thermabot.adapters import db
 from thermabot.app.main import ConfigError, build, create_app, load_env
 from thermabot.app.routes_ui import SUMMARY_KEY
+from thermabot.core.statemachine import Persisted
 
 NOW = datetime(2026, 10, 4, 22, 0, tzinfo=UTC)
 
@@ -58,6 +61,95 @@ def test_app_starts_kill_off_heartbeat_no_climate_calls(tmp_path: Path) -> None:
     assert ha.state_posts == []  # no /api/states publish (token stays non-admin)
     assert {p["auth"] for p in ha.webhook_posts} == {None}  # webhook POST carries no auth
     assert [x for x in ha.calls if x["domain"] == "climate"] == []
+
+
+@pytest.mark.brd("FR-MODE-2")
+@pytest.mark.parametrize(
+    ("kill", "mode", "expected_mode"),
+    [("on", "active", "shadow"), ("on", "shadow", "shadow"), ("off", "active", "active")],
+)
+def test_restart_never_resumes_control(
+    tmp_path: Path, kill: str, mode: str, expected_mode: str
+) -> None:
+    data = tmp_path / "data"
+    seed_house(data)
+    conn = db.open_db(data / "thermabot.db", now=NOW)
+    db.write_bot_state(
+        conn,
+        Persisted.model_validate(
+            {
+                "kill_switch": kill,
+                "run_mode": mode,
+                "shadow_started_at": NOW - timedelta(days=8),
+            }
+        ),
+        by="test",
+        now=NOW,
+    )
+    conn.close()
+    ha = MockHA()
+    ha.states["input_boolean.thermabot_enabled"]["state"] = "on"
+    ha.states[TSTAT]["state"] = "off"
+    ha.states[TSTAT]["attributes"]["current_temperature"] = 50
+    app = create_app(
+        load_env(env(tmp_path)), clock=lambda: NOW, ha_transport=httpx.ASGITransport(app=ha.app)
+    )
+    with TestClient(app):
+        state = db.read_bot_state(app.state.runtime.conn)
+        assert state is not None
+        assert state.kill_switch == kill and state.run_mode == expected_mode
+        notice = db.read_kv(app.state.runtime.conn, "restart_shadow_notice")
+        if kill == "on" and mode == "active":
+            assert notice and "Watch" in notice
+            assert state.shadow_started_at == NOW
+        else:
+            assert notice is None
+            assert state.shadow_started_at == NOW - timedelta(days=8)
+        deadline = time.monotonic() + 20
+        while app.state.runtime.ctx.last_tick is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert app.state.runtime.ctx.last_tick is not None
+        assert not [call for call in ha.calls if call["domain"] == "climate"]
+
+
+@pytest.mark.brd("FR-MODE-2")
+def test_restart_downgrade_and_notice_are_atomic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = tmp_path / "data"
+    seed_house(data)
+    conn = db.open_db(data / "thermabot.db", now=NOW)
+    db.write_bot_state(
+        conn,
+        Persisted(kill_switch="on", run_mode="active", shadow_started_at=NOW - timedelta(days=8)),
+        by="test",
+        now=NOW,
+    )
+    conn.close()
+    app = create_app(
+        load_env(env(tmp_path)),
+        clock=lambda: NOW,
+        ha_transport=httpx.ASGITransport(app=MockHA().app),
+    )
+    original = db.write_kv
+
+    def fail_notice(
+        conn: sqlite3.Connection, key: str, value: str, now: datetime | None = None
+    ) -> None:
+        if key == "restart_shadow_notice":
+            raise sqlite3.OperationalError("simulated notice failure")
+        original(conn, key, value, now)
+
+    monkeypatch.setattr(db, "write_kv", fail_notice)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="simulated notice failure"):
+            with TestClient(app):
+                pass
+        state = db.read_bot_state(app.state.runtime.conn)
+        assert state is not None and state.run_mode == "active"
+        assert db.read_kv(app.state.runtime.conn, "restart_shadow_notice") is None
+    finally:
+        app.state.runtime.conn.close()
 
 
 @pytest.mark.brd("FR-ALR-2")

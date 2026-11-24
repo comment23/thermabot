@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from thermabot.app.units import Units, f_to_c
 from thermabot.config import Settings
 
-OWNER_SECTIONS = ("thermostat", "safety", "off")  # routes_api.SAFETY_SECTIONS
+OWNER_SECTIONS = ("thermostat", "safety", "off", "stop_handoff")  # SAFETY_SECTIONS
 
 TITLES = {
     "thermostat": "Thermostat",
@@ -41,6 +41,7 @@ TITLES = {
     "off": "System off rules",
     "safety": "Safety limits",
     "writes": "Write limits",
+    "stop_handoff": "Stop comfort handoff",
     "fan": "Fan",
     "planner": "Planner",
     "weather": "Weather",
@@ -63,7 +64,7 @@ TASKS: dict[str, tuple[str, ...]] = {
         "comfort",
         "fan",
     ),
-    "safety": ("safety", "off", "writes"),
+    "safety": ("stop_handoff", "safety", "off", "writes"),
     "ha": ("thermostat", "sensors", "weather"),
     "people": ("rooms", "weights", "presence", "aux_heat"),
     "advanced": ("planner", "metrics", "alerts", "summary"),
@@ -87,6 +88,8 @@ ABS_TEMP = {
     "safety.floor_room_f",
     "safety.ceil_tstat_f",
     "safety.ceil_room_f",
+    "stop_handoff.heat_f",
+    "stop_handoff.cool_f",
     "metrics.hdd_base_f",
 }
 

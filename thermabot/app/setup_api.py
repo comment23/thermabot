@@ -2,8 +2,8 @@
 
 Read-only towards Home Assistant: the wizard only ever GETs /api/config and /api/states through
 the `HARead` protocol, which has no service method, so it cannot call a HA service. Secrets
-stay in the environment; nothing here returns the token. Save writes the `settings` row only;
-run mode and the kill switch live in `bot_state` and are never touched.
+stay in the environment; nothing here returns the token. A thermostat change resets Watch
+evidence but never changes the run mode or kill switch.
 """
 
 from __future__ import annotations
@@ -18,7 +18,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from thermabot.app.auth import Principal, require
-from thermabot.app.routes_api import Ctx, _has_row, _kv_put, ctx_of, load_settings
+from thermabot.app.routes_api import (
+    Ctx,
+    _check_thermostat_change,
+    _commit_settings,
+    _has_row,
+    ctx_of,
+    load_settings,
+)
 from thermabot.config import Settings
 from thermabot.core import discovery
 from thermabot.core.types import ForecastPoint
@@ -181,30 +188,34 @@ async def discover(c: CtxD, _: Owner, thermostat: str = "") -> DiscoverOut:
 async def save(body: dict[str, Any], request: Request, c: CtxD, p: Owner) -> SaveOut:
     """Validate through the Settings model and write the row (updated_by = the Owner).
     A thermostat change only takes effect after a restart (both write layers are bound at
-    startup), so the response says so; nothing else about the running bot changes here."""
+    startup), so the response says so and Watch evidence is restarted."""
     try:
         new = Settings.model_validate(body)
     except ValidationError as e:
         errs = [{"loc": list(x["loc"]), "msg": x["msg"]} for x in e.errors()]
         raise HTTPException(422, errs) from e
-    old = load_settings(c)
-    restart = new.thermostat.entity_id != (c.running_entity or "")
-    if new == old and _has_row(c):  # v0.6.1: nothing differs -> no row write, no audit
-        return SaveOut(
-            settings=old, restart_required=restart, running_entity=c.running_entity or ""
+    async with c.kill_lock:
+        old = load_settings(c)
+        _check_thermostat_change(c, old, new)
+        restart = new.thermostat.entity_id != (c.running_entity or "")
+        if new == old and _has_row(c):  # v0.6.1: nothing differs -> no row write, no audit
+            return SaveOut(
+                settings=old, restart_required=restart, running_entity=c.running_entity or ""
+            )
+        _commit_settings(
+            c,
+            old,
+            new,
+            request,
+            p,
+            "setup_save",
+            thermostat=new.thermostat.entity_id,
+            changed=[k for k in Settings.model_fields if getattr(old, k) != getattr(new, k)],
+            restart_required=restart,
         )
-    _kv_put(c, "settings", new.model_dump(mode="json"), p.username)
-    c.settings = new
-    c.audit(
-        p,
-        "setup_save",
-        request,
-        thermostat=new.thermostat.entity_id,
-        changed=[k for k in Settings.model_fields if getattr(old, k) != getattr(new, k)],
-        restart_required=restart,
-    )
-    c.replan()
-    return SaveOut(settings=new, restart_required=restart, running_entity=c.running_entity or "")
+        return SaveOut(
+            settings=new, restart_required=restart, running_entity=c.running_entity or ""
+        )
 
 
 # ---- v0.4.0 weather step (wizard + Settings; Owner and Admin, read-only) --------------------

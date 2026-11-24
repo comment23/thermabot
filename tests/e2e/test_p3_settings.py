@@ -8,6 +8,9 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.conftest import Srv, assert_page_healthy, login
+from tests.house import TSTAT
+from thermabot.adapters import db
+from thermabot.core.statemachine import Persisted
 
 
 def _field(page: Page, path: str) -> object:
@@ -117,6 +120,24 @@ def test_admin_cannot_change_safety(page: Page, srv: Srv) -> None:
     assert res[0] == 403 and "edit_safety" in res[1]
     assert srv.ctx.settings.safety.floor_tstat_f == 62
     srv.errors.clear()
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("NFR-SAFE-5")
+def test_active_thermostat_change_explains_that_control_must_stop(page: Page, srv: Srv) -> None:
+    now = srv.ctx.clock()
+    db.write_bot_state(
+        srv.ctx.conn, Persisted(kill_switch="on", run_mode="active"), by="test", now=now
+    )
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/ha")
+    _open(page, "thermostat")
+    page.fill("[data-path='thermostat.entity_id']", "climate.other")
+    page.click("[data-testid=settings-save]")
+
+    expect(page.locator("[data-testid=errors]")).to_contain_text("Stop Control")
+    assert srv.ctx.settings.thermostat.entity_id == TSTAT
+    srv.errors.clear()  # the rejected 409 request is expected
     assert_page_healthy(page, srv)
 
 

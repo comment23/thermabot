@@ -200,6 +200,9 @@ def render(
         "weather_stale": p is not None and c.weather_health != "ok",
         "weather_health": c.weather_health,
         "ha_health": c.ha_health,
+        "stop_warning": api.stop_warning_of(c) if p else None,
+        "stop_retry_required": c.stop_unpersisted,
+        "restart_notice": db.read_kv(c.conn, api.RESTART_NOTICE_KEY) if p else None,
         "sensors_missing": p is not None and cur.sensors_missing,  # v0.6.1
         "units": cur.display.units,
         "shadow_days": sm.shadow_days(st, c.clock()) if st else 0.0,

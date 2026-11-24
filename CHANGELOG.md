@@ -5,6 +5,22 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.9 - 2026-11-24 (prerelease)
+
+The Home Assistant add-on catalog version is `0.6.8-rc.9`. The in-app version remains
+`0.6.8`. This prerelease does not enable thermostat control; stable v0.6.8 remains blocked on
+the seven-day SHADOW soak and Owner review.
+
+- Start always enters Watch/SHADOW. Control/ACTIVE requires a separate Owner review of seven
+  days of tracked evidence, device readiness, and the independent safety net.
+- Stop in Watch makes no thermostat write. Stop in Control attempts the Owner-configured
+  comfort band through the guarded write path and persists a warning if the handoff cannot be
+  confirmed.
+- Restarting from Active returns the bot to Watch and starts a new evidence window.
+- Thermostat reconfiguration pauses climate reads and writes until restart. A failed Stop-state
+  save fails closed, pauses writes in the running process, attempts to disable the HA mirror,
+  and requires retrying Stop before the warning can be dismissed.
+
 ## 0.6.8-rc.8 - 2026-11-23 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.8`. The in-app version remains

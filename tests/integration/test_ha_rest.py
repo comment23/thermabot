@@ -65,6 +65,18 @@ async def test_mirror_turn_on_off() -> None:
     await c.aclose()
 
 
+@pytest.mark.brd("FR-HA-7")
+@pytest.mark.parametrize("requested", [True, False])
+async def test_mirror_reports_a_service_call_that_does_not_change_state(requested: bool) -> None:
+    ha = MockHA()
+    ha.states["input_boolean.thermabot_enabled"]["state"] = "off" if requested else "on"
+    ha.ignore_writes = True
+    c = mock_client(ha)
+    with pytest.raises(HAError, match="mirror"):
+        await c.set_mirror(requested)
+    await c.aclose()
+
+
 @pytest.mark.brd("FR-HA-2")
 @pytest.mark.parametrize(
     "domain,service,eid",

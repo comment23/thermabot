@@ -6,12 +6,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import sqlite3
 import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
@@ -48,9 +49,11 @@ from thermabot.core.types import (
     OverrideIn,
     OverrideOut,
     Plan,
+    RestoreStatus,
     SavingsOut,
     Snapshot,
     StatusOut,
+    StopBandStatus,
     UserIn,
     UserOut,
     UserPatch,
@@ -62,6 +65,12 @@ TICK_STALE = timedelta(minutes=3)
 START_GRACE = timedelta(seconds=90)
 KILL_BUDGET_S = 5.0
 MIRROR_TIMEOUT_S = 0.9
+STOP_WARNING_KEY = "stop_handoff_warning"
+RESTART_NOTICE_KEY = "restart_shadow_notice"
+STOP_SAVE_WARNING = (
+    "Stop could not be saved. Thermostat writes are paused in this process only. "
+    "Check the thermostat and Home Assistant, then retry Stop."
+)
 log = logging.getLogger(__name__)
 
 
@@ -95,13 +104,14 @@ class Ctx:
     weather_health: str = "ok"
     heartbeat_configured: bool = False
     watchdog_helper: str | None = None  # input_boolean.thermabot_watchdog state
-    kill_restore: Callable[[datetime], Awaitable[str]] | None = None  # Controller.kill_restore
+    kill_restore: Callable[[datetime, Settings], Awaitable[tuple[RestoreStatus, str]]] | None = None
     set_mirror: Callable[[bool], Awaitable[None]] = _noop_async
     replan: Callable[[], None] = lambda: None
     refit: Callable[[], Awaitable[object]] = _noop_async
     send_alert: Callable[[str], Awaitable[object]] = _noop_async
     savings: Callable[[], SavingsOut] = SavingsOut
     kill_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stop_unpersisted: bool = False
     # v0.3.0 setup wizard: read-only HA client (GET /api/config, /api/states only), the
     # configured HA_URL for display (never the token), a short discovery cache, and the
     # thermostat entity the running controller was built with (a change needs a restart).
@@ -122,7 +132,10 @@ class Ctx:
         live = self.live.model_copy(
             update={
                 "override_open": self.open_override() is not None,
-                "setup_needed": self.live.setup_needed or not self.settings.thermostat.configured,
+                "ha_mirror": "off" if self.stop_unpersisted else self.live.ha_mirror,
+                "setup_needed": self.live.setup_needed
+                or not self.settings.thermostat.configured
+                or self.settings.thermostat.entity_id != self.running_entity,
             }
         )
         return sm.effective(db.read_bot_state(self.conn), live)
@@ -153,6 +166,29 @@ class Ctx:
 
 def _iso(t: datetime) -> str:
     return t.astimezone(UTC).isoformat()
+
+
+def _stored_stop_warning(c: Ctx) -> str | None:
+    warning = db.read_kv(c.conn, STOP_WARNING_KEY)
+    if (
+        warning is None
+        and c.conn.execute("SELECT 1 FROM bot_kv WHERE key=?", (STOP_WARNING_KEY,)).fetchone()
+    ):
+        warning = "Stop warning is unreadable. Check the thermostat before acknowledging."
+    return warning or None
+
+
+def stop_warning_of(c: Ctx) -> str | None:
+    warning = _stored_stop_warning(c)
+    if c.stop_unpersisted:
+        return _append_warning(warning, STOP_SAVE_WARNING)
+    return warning
+
+
+def _append_warning(previous: str | None, warning: str) -> str:
+    if not previous:
+        return warning
+    return previous if warning in previous else f"{previous} {warning}"
 
 
 def ctx_of(request: Request) -> Ctx:
@@ -223,6 +259,11 @@ async def status(c: CtxD, _: View) -> StatusOut:
         score=c.score,
         rooms=list(snap.rooms.values()) if snap else [],
         next_change=nxt,
+        stop_warning=stop_warning_of(c),
+        stop_retry_required=c.stop_unpersisted,
+        restart_notice=db.read_kv(c.conn, RESTART_NOTICE_KEY) or None,
+        stop_handoff=StopBandStatus(**c.settings.stop_handoff.model_dump()),
+        display_units=c.settings.display.units,
     )
 
 
@@ -246,47 +287,195 @@ class ReadinessOut(BaseModel):
     first_write: str | None = None
 
 
+def shadow_evidence(c: Ctx, st: sm.Persisted | None, now: datetime) -> tuple[bool, str]:
+    """Require a bounded, tracked seven-day observation, not just an old start time."""
+    from thermabot.app.jobs import LOCAL_MAX_AGE, minute_key
+
+    start = now - timedelta(days=sm.SHADOW_MIN_DAYS)
+    if (
+        st is None
+        or st.shadow_started_at is None
+        or st.shadow_started_at.tzinfo is None
+        or st.shadow_started_at > start
+    ):
+        days = (
+            max(0.0, sm.shadow_days(st, now))
+            if st and st.shadow_started_at and st.shadow_started_at.tzinfo
+            else 0.0
+        )
+        return False, f"Needs 7 d of Watch; {days:.1f} d elapsed."
+    start_key, end_key = minute_key(start), _iso(now)
+    rows = c.conn.execute(
+        "SELECT ts, bot_state, snapshot_json, stale_rooms FROM samples"
+        " WHERE ts >= ? AND ts <= ? ORDER BY ts",
+        (start_key, end_key),
+    ).fetchall()
+    required = sm.SHADOW_MIN_DAYS * 24 * 60 * 95 // 100
+    if len(rows) < required:
+        return False, f"7 d needs at least 95% sampled minutes ({len(rows)}/{required} minimum)."
+    previous: datetime | None = None
+    degraded = stale = 0
+    for row in rows:
+        try:
+            stamp = datetime.fromisoformat(row["ts"])
+            snapshot = json.loads(row["snapshot_json"])
+        except (TypeError, ValueError):
+            return False, "Watch evidence contains an unreadable sample."
+        if stamp.tzinfo is None or stamp.second or stamp.microsecond:
+            return False, "Watch evidence contains an invalid sample time."
+        if (previous is None and stamp - start > LOCAL_MAX_AGE) or (
+            previous is not None and not timedelta(0) < stamp - previous <= LOCAL_MAX_AGE
+        ):
+            return False, "Watch evidence has a sampling gap longer than 3 minutes."
+        metadata = snapshot.get("_thermabot") if isinstance(snapshot, dict) else None
+        if (
+            row["bot_state"] != "SHADOW"
+            or not isinstance(metadata, dict)
+            or metadata.get("state") not in {"SHADOW", "DEGRADED", "OVERRIDE"}
+        ):
+            return False, "Watch evidence contains an untracked or non-Shadow sample."
+        if metadata["state"] == "DEGRADED" and metadata.get("degraded_reason") not in {
+            "ha",
+            "weather",
+            "sensors",
+        }:
+            return False, "Watch evidence contains a degraded sample without a known reason."
+        degraded += metadata["state"] == "DEGRADED"
+        stale += bool(row["stale_rooms"])
+        previous = stamp
+    if previous is None or not timedelta(0) <= now - previous <= LOCAL_MAX_AGE:
+        return False, "Watch evidence is not current."
+    write = c.conn.execute(
+        "SELECT 1 FROM writes WHERE ts >= ? AND ts <= ?"
+        " AND (outcome='sent' OR (outcome='failed' AND COALESCE(guard, '') != 'not_sent'))"
+        " LIMIT 1",
+        (start_key, end_key),
+    ).fetchone()
+    if write:
+        return False, "A sent or unconfirmed thermostat write occurred during the Watch window."
+    events = c.conn.execute(
+        "SELECT action, detail_json FROM audit WHERE ts >= ? AND ts <= ?"
+        " AND action IN ('kill_off', 'kill_on', 'restart_to_shadow')",
+        (start_key, end_key),
+    ).fetchall()
+    for event in events:
+        if event["action"] != "kill_on":
+            return False, "Watch was interrupted during the seven-day window."
+        try:
+            detail = json.loads(event["detail_json"])
+        except (TypeError, ValueError):
+            return False, "Watch transition history is unreadable."
+        if not isinstance(detail, dict) or detail.get("mode") != "shadow":
+            return False, "Control was enabled during the seven-day Watch window."
+    return (
+        True,
+        f"{len(rows)} samples; {degraded} degraded, {stale} with stale rooms. Review required.",
+    )
+
+
 def readiness_of(c: Ctx) -> ReadinessOut:
-    """What has to be true before Active is offered. The server still refuses a short soak."""
+    """Checks enforced by the server before the Owner may enable Active."""
+    from thermabot.app.controller import stop_handoff_action
+    from thermabot.app.jobs import active_model, current_step
     from thermabot.app.present import action_sentence
     from thermabot.app.units import temperature_scale
+    from thermabot.core.guards import GuardCtx, hard_limits
+    from thermabot.core.thermal import in_range
 
     now = c.clock()
     st = db.read_bot_state(c.conn)
-    days = sm.shadow_days(st, now) if st else 0.0
-    model = c.conn.execute(
-        "SELECT version FROM models WHERE active=1 ORDER BY version DESC LIMIT 1"
-    ).fetchone()
+    soak_ok, soak_detail = shadow_evidence(c, st, now)
+    stop_warning = stop_warning_of(c)
+    s = load_settings(c)
+    try:
+        params, _, _ = active_model(c.conn, s.planner)
+        model_ok = params is not None and in_range(params) and math.isfinite(params.sigma)
+    except (ValidationError, ValueError, TypeError, AttributeError) as exc:
+        log.error("active thermal model is invalid: %s", type(exc).__name__)
+        model_ok = False
     snap = c.snapshot
     th = snap.thermostat if snap else None
     caps = (
         th is not None
         and temperature_scale(th.temperature_unit) is not None
         and th.target_temp_step is not None
+        and math.isfinite(th.target_temp_step)
         and th.target_temp_step > 0
         and th.min_temp is not None
         and th.max_temp is not None
+        and math.isfinite(th.min_temp)
+        and math.isfinite(th.max_temp)
+        and th.min_temp < th.max_temp
+        and bool({"heat_cool", "auto"}.intersection(th.hvac_modes))
     )
-    net = c.heartbeat_configured or c.watchdog_helper in ("on", "off")
-    s = load_settings(c)
+    watch = (
+        st is not None
+        and st.kill_switch == "on"
+        and st.run_mode == "shadow"
+        and c.eff().state == "SHADOW"
+    )
+    fresh = (
+        c.ha_health == "ok"
+        and c.last_tick is not None
+        and timedelta(0) <= now - c.last_tick <= TICK_STALE
+        and th is not None
+        and th.last_reported is not None
+        and timedelta(0) <= now - th.last_reported <= timedelta(minutes=sm.TSTAT_MAX_AGE_MIN)
+        and s.thermostat.entity_id == c.running_entity
+    )
+    handoff = False
+    if caps and th is not None and th.min_temp is not None and th.max_temp is not None:
+        action, _ = stop_handoff_action(s, th, s.thermostat.entity_id)
+        if action is not None:
+            guard = GuardCtx(
+                kill_switch="on",
+                ha_mirror="on",
+                run_mode="active",
+                snapshot=snap,
+                settings=s,
+                now=now,
+                device_min_f=th.min_temp,
+                device_max_f=th.max_temp,
+            )
+            limited, _ = hard_limits(action, guard)
+            handoff = limited is not None and limited.data == action.data
+    net = c.heartbeat_configured or c.watchdog_helper == "on"
+    plan_ok = (
+        c.plan is not None
+        and bool(c.plan.steps)
+        and timedelta(0) <= now - c.plan.created_at <= timedelta(hours=2)
+    )
     checks = [
         ReadyCheck(
-            id="soak",
-            ok=days >= sm.SHADOW_MIN_DAYS,
-            label=f"Shadow soak {min(days, sm.SHADOW_MIN_DAYS):.0f}/{sm.SHADOW_MIN_DAYS} days",
-            detail=f"{days:.1f} days of Shadow so far",
+            id="watch",
+            ok=watch,
+            label="Watching without an active override",
+            detail="Watch is running"
+            if watch
+            else "Start Watch and resolve any degraded state or override.",
         ),
         ReadyCheck(
+            id="stop_warning",
+            ok=stop_warning is None,
+            label="Previous stop checked",
+            detail="No unresolved stop warning"
+            if stop_warning is None
+            else "Check the thermostat and acknowledge the stop warning.",
+        ),
+        ReadyCheck(id="soak", ok=soak_ok, label="Seven-day Watch evidence", detail=soak_detail),
+        ReadyCheck(
             id="model",
-            ok=model is not None,
+            ok=model_ok,
             label="Thermal model fitted",
-            detail="A model is active" if model else "No fitted model yet",
+            detail="A valid model is active" if model_ok else "No valid fitted model is active.",
         ),
         ReadyCheck(
             id="ha",
-            ok=c.ha_health == "ok",
-            label="Home Assistant healthy",
-            detail=c.ha_health,
+            ok=fresh,
+            label="Home Assistant and thermostat current",
+            detail="Recent tick and thermostat reading"
+            if fresh
+            else "A current HA tick and thermostat reading are required.",
         ),
         ReadyCheck(
             id="sensors",
@@ -300,26 +489,40 @@ def readiness_of(c: Ctx) -> ReadinessOut:
             id="device",
             ok=bool(caps),
             label="Device capabilities verified",
-            detail="Unit, step, and range are known" if caps else "Capabilities are missing",
+            detail="Unit, step, range, and dual-setpoint mode are known"
+            if caps
+            else "A dual-setpoint mode, unit, step, and range are required.",
+        ),
+        ReadyCheck(
+            id="handoff",
+            ok=handoff,
+            label="Stop comfort band configured",
+            detail="Owner-approved band is compatible with current device capabilities"
+            if handoff
+            else "Configure a stop band compatible with the device and safety limits.",
         ),
         ReadyCheck(
             id="net",
             ok=net,
-            label="Home Assistant safety net installed",
-            detail="Heartbeat or watchdog helper is present"
+            label="Safety-net configuration present",
+            detail="Configuration is not proof the HA safety net works; verify it independently."
             if net
-            else "Install the optional HA package before Active",
+            else "Configure a heartbeat or armed watchdog; independently verify the safety net.",
+        ),
+        ReadyCheck(
+            id="plan",
+            ok=plan_ok,
+            label="Recent plan available",
+            detail="A recent plan is available" if plan_ok else "Wait for a current plan.",
         ),
     ]
     first: str | None = None
     if c.plan is not None:
-        nxt = next((step for step in c.plan.steps if step.t > now), None)
-        if nxt is None and c.plan.steps:
-            nxt = c.plan.steps[0]
+        nxt = current_step(c.plan, now) or next(
+            (step for step in c.plan.steps if step.t > now), None
+        )
         if nxt is not None:
             first = action_sentence(nxt, s.display.units)
-            if st is None or st.run_mode != "active":
-                first += " · Shadow would not send this"
     return ReadinessOut(ready=all(ch.ok for ch in checks), checks=checks, first_write=first)
 
 
@@ -554,9 +757,7 @@ async def logout(request: Request, c: CtxD) -> JSONResponse:
 # ---- kill switch (FR-KILL-1..5, D§11.2) ------------------------------------------------
 @router.post("/api/kill", response_model=KillOut)
 async def kill(body: KillIn, request: Request, c: CtxD, p: KillOff) -> KillOut:
-    """OFF: restore=band + system `off` -> ONE restore write, THEN the row goes OFF (the only
-    write permitted as part of disabling); restore failure never blocks OFF. ON needs a mode
-    (kill_on; ACTIVE also set_active + SHADOW_MIN_DAYS of SHADOW). DB row first, then HA mirror."""
+    """Stop always disables the bot, even when the optional Active handoff fails."""
     async with c.kill_lock:
         return await asyncio.wait_for(_kill(body, request, c, p), KILL_BUDGET_S)
 
@@ -564,53 +765,249 @@ async def kill(body: KillIn, request: Request, c: CtxD, p: KillOff) -> KillOut:
 async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut:
     now = c.clock()
     cur = db.read_bot_state(c.conn)
-    restore: str | None = None
+    restore: RestoreStatus | None = None
+    restore_detail: str | None = None
     if body.enabled:
         if not p.can("kill_on"):
             raise HTTPException(403, "needs kill_on")
+        if c.stop_unpersisted:
+            raise HTTPException(409, "Retry Stop before starting the bot.")
         if body.mode is None:
             raise HTTPException(422, "turning ON needs mode 'shadow' or 'active'")
         if body.mode == "active" and not p.can("set_active"):
             raise HTTPException(403, "needs set_active")
+        if body.mode == "active":
+            readiness = readiness_of(c)
+            if not readiness.ready:
+                why = "; ".join(check.detail for check in readiness.checks if not check.ok)
+                c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
+                raise HTTPException(409, f"Control unavailable: {why}")
+            if (
+                body.confirmation != "ACTIVE"
+                or not body.reviewed_shadow
+                or not body.reviewed_safety_net
+            ):
+                why = (
+                    "Owner review of Watch evidence and the HA safety net, plus ACTIVE "
+                    "confirmation, is required."
+                )
+                c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
+                raise HTTPException(409, why)
         try:
             new = sm.turn_on(cur, body.mode, now)
         except ValueError as e:
             c.audit(p, "kill_on_denied", request, mode=body.mode, why=str(e))
             raise HTTPException(409, str(e)) from e
+        if body.mode == "active":
+            # Keep Watch persisted while awaiting HA, then recheck before enabling writes.
+            try:
+                await asyncio.wait_for(c.set_mirror(True), MIRROR_TIMEOUT_S)
+            except asyncio.CancelledError:
+                c.audit(p, "kill_on_denied", request, mode=body.mode, why="mirror interrupted")
+                raise
+            except Exception as e:  # noqa: BLE001 - an unconfirmed mirror cannot enable control
+                log.warning("control enable mirror failed: %s", type(e).__name__)
+                c.audit(p, "kill_on_denied", request, mode=body.mode, why="mirror unavailable")
+                raise HTTPException(
+                    503, "Control was not enabled; check the Home Assistant enable mirror."
+                ) from e
+            readiness = readiness_of(c)
+            if not readiness.ready:
+                why = "; ".join(check.detail for check in readiness.checks if not check.ok)
+                c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
+                raise HTTPException(409, f"Control unavailable: {why}")
+            new = new.model_copy(update={"shadow_started_at": None})
     else:
-        already_off = cur is None or cur.kill_switch == "off"
-        if body.restore == "leave":
-            restore = "skipped"
-        elif already_off or c.kill_restore is None:
-            restore = "skipped"
-        else:
-            restore = await c.kill_restore(now)
-        new = sm.turn_off(cur, now)
-    db.write_bot_state(c.conn, new, by=p.username, now=now)
+        previous_warning: str | None = None
+        handoff_pending = False
+        try:
+            if c.stop_unpersisted:
+                previous_warning = _stored_stop_warning(c)
+                restore, restore_detail = (
+                    "failed",
+                    "A previous Stop could not be saved; the comfort handoff was not repeated. "
+                    "Check the thermostat.",
+                )
+            elif cur is None or cur.kill_switch == "off" or cur.run_mode == "shadow":
+                restore, restore_detail = (
+                    "skipped",
+                    "No thermostat write is made while stopped or watching.",
+                )
+            elif c.kill_restore is None:
+                previous_warning = stop_warning_of(c)
+                restore, restore_detail = (
+                    "failed",
+                    "Comfort handoff is unavailable; check the thermostat.",
+                )
+            else:
+                previous_warning = stop_warning_of(c)
+                pending = (
+                    "Comfort handoff is in progress and may change the thermostat. "
+                    "Check it if interrupted."
+                )
+                db.write_kv(
+                    c.conn,
+                    STOP_WARNING_KEY,
+                    _append_warning(previous_warning, pending),
+                    now=now,
+                )
+                handoff_pending = True
+                restore, restore_detail = await c.kill_restore(now, load_settings(c))
+        except asyncio.CancelledError:
+            restore, restore_detail = (
+                "failed",
+                "Comfort handoff was interrupted and may have changed the thermostat. Check it.",
+            )
+            c.audit(
+                p,
+                "kill_off",
+                request,
+                mode=body.mode,
+                restore=restore,
+                restore_detail=restore_detail,
+                mirror_ok=False,
+                interrupted=True,
+            )
+            raise
+        except Exception:  # noqa: BLE001 - a failed handoff must never prevent stopping
+            log.exception("stop comfort handoff failed")
+            restore, restore_detail = "failed", "Comfort handoff failed; check the thermostat."
+        finally:
+            new = sm.turn_off(cur, now).model_copy(update={"shadow_started_at": None})
+            try:
+                if restore == "failed":
+                    warning = restore_detail or "Check the thermostat."
+                    db.write_kv(
+                        c.conn,
+                        STOP_WARNING_KEY,
+                        _append_warning(previous_warning, warning),
+                        now=now,
+                    )
+                elif handoff_pending:
+                    db.write_kv(c.conn, STOP_WARNING_KEY, previous_warning or "", now=now)
+            finally:
+                try:
+                    db.write_bot_state(c.conn, new, by=p.username, now=now)
+                except Exception as exc:  # noqa: BLE001 - fail closed if Stop cannot persist
+                    c.stop_unpersisted = True
+                    log.exception("stop state could not be saved; thermostat writes are paused")
+                    c.broker.publish(
+                        "state",
+                        {
+                            "state": "DISABLED",
+                            "label": "DISABLED",
+                            "kill_switch": cur.kill_switch if cur else "off",
+                            "run_mode": cur.run_mode if cur else "shadow",
+                            "stop_warning": STOP_SAVE_WARNING,
+                            "stop_retry_required": True,
+                        },
+                    )
+                    try:
+                        await asyncio.wait_for(c.set_mirror(False), MIRROR_TIMEOUT_S)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as mirror_exc:  # noqa: BLE001 - local latch remains engaged
+                        log.warning("HA enable mirror off failed: %s", type(mirror_exc).__name__)
+                    raise HTTPException(503, STOP_SAVE_WARNING) from exc
+                else:
+                    c.stop_unpersisted = False
+    if body.enabled:
+        db.write_bot_state(c.conn, new, by=p.username, now=now)
     mirror_ok = True
     try:
-        await asyncio.wait_for(c.set_mirror(new.kill_switch == "on"), MIRROR_TIMEOUT_S)
-    except Exception:  # noqa: BLE001 - mirror disagreement => DISABLED anyway (safe)
+        if not (body.enabled and body.mode == "active"):
+            await asyncio.wait_for(c.set_mirror(new.kill_switch == "on"), MIRROR_TIMEOUT_S)
+    except asyncio.CancelledError:
+        if not body.enabled:
+            previous = stop_warning_of(c)
+            warning = (
+                "Stop was interrupted before the HA enable mirror was confirmed. "
+                "Check the thermostat and HA."
+            )
+            db.write_kv(
+                c.conn,
+                STOP_WARNING_KEY,
+                _append_warning(previous, warning),
+                now=now,
+            )
+            c.audit(
+                p,
+                "kill_off",
+                request,
+                mode=body.mode,
+                restore=restore,
+                restore_detail=restore_detail,
+                mirror_ok=False,
+                interrupted=True,
+            )
+        raise
+    except Exception as e:  # noqa: BLE001 - mirror disagreement => DISABLED anyway (safe)
+        log.warning("HA enable mirror update failed: %s", type(e).__name__)
         mirror_ok = False
     if mirror_ok:
         c.live = c.live.model_copy(update={"ha_mirror": new.kill_switch})
+    elif not body.enabled:
+        previous = stop_warning_of(c)
+        warning = "HA enable mirror was not confirmed off. Check the thermostat and HA."
+        db.write_kv(c.conn, STOP_WARNING_KEY, _append_warning(previous, warning), now=now)
     c.audit(
         p,
         "kill_on" if body.enabled else "kill_off",
         request,
         mode=body.mode,
         restore=restore,
+        restore_detail=restore_detail,
         mirror_ok=mirror_ok,
+        reviewed_shadow=body.reviewed_shadow if body.mode == "active" else None,
+        reviewed_safety_net=body.reviewed_safety_net if body.mode == "active" else None,
     )
     eff = c.eff()
-    c.broker.publish("state", {"state": eff.state, "label": eff.label})
+    c.broker.publish(
+        "state",
+        {
+            "state": eff.state,
+            "label": eff.label,
+            "kill_switch": new.kill_switch,
+            "run_mode": new.run_mode,
+            "stop_warning": stop_warning_of(c),
+            "stop_retry_required": c.stop_unpersisted,
+            "restart_notice": db.read_kv(c.conn, RESTART_NOTICE_KEY) or None,
+        },
+    )
     return KillOut(
         state=eff.state,
         kill_switch=new.kill_switch,
         run_mode=new.run_mode,
         restore=restore,
+        restore_detail=restore_detail,
+        stop_warning=stop_warning_of(c),
         mirror_ok=mirror_ok,
     )
+
+
+class NoticeIn(BaseModel):
+    kind: Literal["stop_handoff", "restart_shadow"]
+
+
+@router.post("/api/notices/acknowledge", response_model=OkOut)
+async def acknowledge_notice(body: NoticeIn, request: Request, c: CtxD, p: KillOff) -> OkOut:
+    key = STOP_WARNING_KEY if body.kind == "stop_handoff" else RESTART_NOTICE_KEY
+    async with c.kill_lock:
+        if body.kind == "stop_handoff" and c.stop_unpersisted:
+            raise HTTPException(409, "Retry Stop before acknowledging the warning.")
+        db.write_kv(c.conn, key, "", now=c.clock())
+        c.audit(p, "notice_acknowledged", request, kind=body.kind)
+        eff = c.eff()
+        c.broker.publish(
+            "state",
+            {
+                "state": eff.state,
+                "label": eff.label,
+                "stop_warning": stop_warning_of(c),
+                "restart_notice": db.read_kv(c.conn, RESTART_NOTICE_KEY) or None,
+            },
+        )
+    return OkOut(detail="Notice acknowledged")
 
 
 # ---- override / nudge / guest ---------------------------------------------------------
@@ -763,7 +1160,7 @@ async def guest(body: GuestIn, request: Request, c: CtxD, p: Guest) -> OkOut:
 
 
 # ---- settings (D§14.3) -----------------------------------------------------------------
-SAFETY_SECTIONS = ("safety", "off", "thermostat")  # changing these needs edit_safety (Owner)
+SAFETY_SECTIONS = ("safety", "off", "thermostat", "stop_handoff")
 
 
 def load_settings(c: Ctx) -> Settings:
@@ -775,9 +1172,59 @@ def _has_row(c: Ctx) -> bool:
     return c.conn.execute("SELECT 1 FROM settings WHERE key='settings'").fetchone() is not None
 
 
+def _check_thermostat_change(c: Ctx, old: Settings, new: Settings) -> None:
+    if old.thermostat.entity_id == new.thermostat.entity_id:
+        return
+    state = db.read_bot_state(c.conn)
+    if state is not None and state.kill_switch == "on" and state.run_mode == "active":
+        raise HTTPException(409, "Stop Control before changing the thermostat.")
+
+
 @router.get("/api/settings", response_model=Settings)
 async def settings_get(c: CtxD, _: Comfort) -> Settings:
     return load_settings(c)
+
+
+def _commit_settings(
+    c: Ctx,
+    old: Settings,
+    new: Settings,
+    request: Request,
+    p: Principal,
+    action: str,
+    **detail: object,
+) -> None:
+    with c.conn:
+        c.conn.execute("BEGIN")
+        _kv_put(c, "settings", new.model_dump(mode="json"), p.username)
+        if old.thermostat.entity_id != new.thermostat.entity_id:
+            state = db.read_bot_state(c.conn)
+            if state is not None:
+                now = c.clock()
+                started = now if state.kill_switch == "on" and state.run_mode == "shadow" else None
+                if state.shadow_started_at != started:
+                    db.write_bot_state(
+                        c.conn,
+                        state.model_copy(update={"shadow_started_at": started}),
+                        by=p.username,
+                        now=now,
+                    )
+        c.audit(p, action, request, **detail)
+    c.settings = new
+    c.replan()
+
+
+def _save_settings(new: Settings, request: Request, c: Ctx, p: Principal) -> Settings:
+    """Persist validated settings while the caller holds the lifecycle lock."""
+    old = load_settings(c)
+    touched = [s for s in SAFETY_SECTIONS if getattr(old, s) != getattr(new, s)]
+    if touched and not p.can("edit_safety"):
+        raise HTTPException(403, f"needs edit_safety for {', '.join(touched)}")
+    _check_thermostat_change(c, old, new)
+    if new == old and _has_row(c):
+        return old  # v0.6.1: nothing differs -> no row write, no audit, no replan
+    _commit_settings(c, old, new, request, p, "settings_save", safety=touched)
+    return new
 
 
 @router.put("/api/settings", response_model=Settings)
@@ -789,17 +1236,8 @@ async def settings_put(body: dict[str, Any], request: Request, c: CtxD, p: Comfo
     except ValidationError as e:
         errs = [{"loc": list(x["loc"]), "msg": x["msg"]} for x in e.errors()]
         raise HTTPException(422, errs) from e
-    old = load_settings(c)
-    touched = [s for s in SAFETY_SECTIONS if getattr(old, s) != getattr(new, s)]
-    if touched and not p.can("edit_safety"):
-        raise HTTPException(403, f"needs edit_safety for {', '.join(touched)}")
-    if new == old and _has_row(c):
-        return old  # v0.6.1: nothing differs -> no row write, no audit, no replan
-    _kv_put(c, "settings", new.model_dump(mode="json"), p.username)
-    c.settings = new
-    c.audit(p, "settings_save", request, safety=touched)
-    c.replan()
-    return new
+    async with c.kill_lock:
+        return _save_settings(new, request, c, p)
 
 
 # ---- model / alerts (Owner) ------------------------------------------------------------

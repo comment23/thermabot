@@ -1,6 +1,4 @@
-"""v0.3.0 setup wizard API: Owner only, read-only towards HA (no service call ever), short
-cache, graceful timeout, save writes only the settings row (never run mode / kill switch),
-restart flag on a thermostat change, X-Ingress-Path honoured, X-Remote-User-* ignored."""
+"""Setup wizard API: Owner only, read-only towards HA, with restart and Watch safety."""
 
 from __future__ import annotations
 
@@ -13,7 +11,7 @@ import pytest
 import thermabot
 from tests.house import HOUSE, TSTAT, house_dict
 from tests.integration.mock_ha import GOOD_TOKEN, MockHA
-from tests.integration.test_api import login, make
+from tests.integration.test_api import NOW, login, make
 from thermabot.adapters import db
 from thermabot.adapters.ha_rest import HARest
 from thermabot.app import setup_api
@@ -197,7 +195,6 @@ def test_save_writes_row_by_owner_and_flags_restart(tmp_path: Path) -> None:
     replans: list[int] = []
     ctx.replan = lambda: replans.append(1)
     before = db.read_bot_state(ctx.conn)
-    raw_before = [tuple(r) for r in ctx.conn.execute("SELECT * FROM bot_state")]
     h = login(c, "alex")
     body = {**house_dict(), "display": {"units": "C"}}
     r = c.post("/api/setup/save", json=body, headers=h)
@@ -214,7 +211,7 @@ def test_save_writes_row_by_owner_and_flags_restart(tmp_path: Path) -> None:
     after = db.read_bot_state(ctx.conn)
     assert before is not None and after is not None
     assert (after.kill_switch, after.run_mode) == (before.kill_switch, before.run_mode)
-    assert [tuple(r) for r in ctx.conn.execute("SELECT * FROM bot_state")] == raw_before
+    assert after.shadow_started_at == NOW
     assert ctx.running_entity == ""  # the running controller is not re-bound
     assert replans == [1] and ha.calls == []
     acts = [r[0] for r in ctx.conn.execute("SELECT action FROM audit WHERE actor='alex'")]

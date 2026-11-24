@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 HvacMode = Literal["off", "heat", "cool", "heat_cool", "auto"]
 FanMode = Literal["auto", "on"]
@@ -205,6 +205,12 @@ class OverrideOut(BaseModel):
     command_detail: str | None = None
 
 
+class StopBandStatus(BaseModel):
+    enabled: bool
+    heat_f: float
+    cool_f: float
+
+
 class StatusOut(BaseModel):
     state: str
     label: str
@@ -217,6 +223,11 @@ class StatusOut(BaseModel):
     score: float | None = None
     rooms: list[RoomReading] = Field(default_factory=list)
     next_change: str | None = None
+    stop_warning: str | None = None
+    stop_retry_required: bool = False
+    restart_notice: str | None = None
+    stop_handoff: StopBandStatus
+    display_units: Literal["F", "C"] = "F"
 
 
 class SavingsOut(BaseModel):
@@ -235,13 +246,22 @@ class KillIn(BaseModel):
     enabled: bool
     restore: Literal["band", "leave"] = "band"
     mode: Literal["shadow", "active"] | None = None
+    confirmation: Literal["ACTIVE"] | None = None
+    reviewed_shadow: StrictBool = False
+    reviewed_safety_net: StrictBool = False
+
+
+RestoreStatus = Literal["sent", "failed", "not_needed", "skipped"]
 
 
 class KillOut(BaseModel):
     state: str
     kill_switch: Literal["on", "off"]
     run_mode: Literal["shadow", "active"]
-    restore: Literal["sent", "failed", "not_needed", "skipped"] | None = None
+    restore: RestoreStatus | None = None
+    restore_detail: str | None = None
+    stop_warning: str | None = None
+    stop_retry_required: bool = False
     mirror_ok: bool
 
 

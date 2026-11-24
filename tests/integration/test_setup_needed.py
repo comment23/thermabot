@@ -4,22 +4,28 @@ never read or write a climate entity, and SHADOW stays the default run mode."""
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from tests.house import HOUSE, TSTAT, seed_house
 from tests.integration.mock_ha import BOT_USER_ID, GOOD_TOKEN, MockHA
 from tests.integration.test_controller import LIVE, NOW, STEP, Sleeps, snap
 from tests.integration.test_main import env
 from thermabot.adapters import db
-from thermabot.adapters.ha_rest import HARest
+from thermabot.adapters.ha_rest import HAError, HARest, WriteRefused
+from thermabot.app.auth import Principal
 from thermabot.app.controller import Controller
-from thermabot.app.main import create_app, load_env
+from thermabot.app.main import Runtime, build, create_app, load_env
+from thermabot.app.routes_api import settings_put
 from thermabot.config import Settings
 from thermabot.core.statemachine import Persisted
+from thermabot.core.types import Forecast
 
 
 class Recorder(httpx.AsyncBaseTransport):
@@ -85,6 +91,78 @@ def test_configured_row_loads_and_reads_its_thermostat(tmp_path: Path) -> None:
     conn.close()
 
 
+@pytest.fixture
+async def pending_thermostat(
+    tmp_path: Path, replacement: str
+) -> AsyncIterator[tuple[Runtime, MockHA, Recorder]]:
+    seed_house(tmp_path / "data")
+    ha = MockHA()
+    transport = Recorder(httpx.ASGITransport(app=ha.app))
+    rt = build(load_env(env(tmp_path)), clock=lambda: NOW, ha_transport=transport)
+    body = rt.ctx.settings.model_dump(mode="json")
+    body["thermostat"]["entity_id"] = replacement
+    request = Request({"type": "http", "method": "PUT", "path": "/api/settings", "headers": []})
+    owner = Principal(user_id=1, username="alex", role="owner")
+    await settings_put(body, request, rt.ctx, owner)
+    try:
+        yield rt, ha, transport
+    finally:
+        await rt.aclose()
+
+
+@pytest.mark.brd("FR-CFG-1")
+@pytest.mark.parametrize("replacement", ["", "climate.other"])
+async def test_pending_thermostat_change_pauses_watch_immediately(
+    pending_thermostat: tuple[Runtime, MockHA, Recorder],
+) -> None:
+    rt, _, _ = pending_thermostat
+    db.write_bot_state(rt.conn, Persisted(kill_switch="on", run_mode="shadow"), by="test", now=NOW)
+    assert rt.ctx.eff().state == "DISABLED"
+    assert rt.ctx.eff().label == "SETUP NEEDED"
+
+
+@pytest.mark.brd("NFR-SAFE-5")
+@pytest.mark.parametrize("replacement", ["", "climate.other"])
+@pytest.mark.parametrize("job", ["tick", "replan"])
+async def test_pending_thermostat_change_never_reads_old_entity(
+    pending_thermostat: tuple[Runtime, MockHA, Recorder],
+    monkeypatch: pytest.MonkeyPatch,
+    job: str,
+) -> None:
+    rt, ha, transport = pending_thermostat
+
+    async def no_forecast(_: datetime) -> Forecast:
+        raise RuntimeError("forecast unavailable in this test")
+
+    monkeypatch.setattr(rt, "fetch_forecast", no_forecast)
+    if job == "tick":
+        await rt.tick(NOW)
+    else:
+        await rt.replan(NOW)
+
+    assert not [path for path in transport.paths if "climate." in path]
+    assert not [call for call in ha.calls if call["domain"] == "climate"]
+
+
+@pytest.mark.brd("NFR-SAFE-5")
+@pytest.mark.parametrize("replacement", ["", "climate.other"])
+@pytest.mark.parametrize("operation", ["read", "write"])
+async def test_pending_thermostat_change_is_denied_by_runtime_adapter(
+    pending_thermostat: tuple[Runtime, MockHA, Recorder], operation: str
+) -> None:
+    rt, ha, transport = pending_thermostat
+    if operation == "read":
+        with pytest.raises(HAError, match="thermostat"):
+            await rt.ha.get_state(TSTAT)
+    else:
+        with pytest.raises(WriteRefused, match="thermostat"):
+            await rt.ha._post_service(
+                "climate", "set_temperature", {"entity_id": TSTAT, "temperature": 70}
+            )
+    assert not transport.paths
+    assert not ha.calls
+
+
 def _controller(tmp: Path, settings: Settings) -> tuple[Controller, MockHA]:
     conn = db.open_db(tmp / "t.db", now=NOW)
     db.write_bot_state(
@@ -112,9 +190,34 @@ async def test_unconfigured_controller_never_writes(tmp_path: Path) -> None:
     c, ha = _controller(tmp_path, Settings())
     assert await c.tick(snap(), STEP, LIVE, NOW) == []  # ACTIVE + plan step: still nothing
     assert await c.tick(snap(mode="off"), STEP, LIVE, NOW) == []  # off: no safety restore
-    assert await c.kill_restore(NOW) == "skipped"
+    result, detail = await c.kill_restore(NOW)
+    assert result == "failed"
+    assert "No thermostat" in detail
     assert ha.calls == []
     assert c.conn.execute("SELECT COUNT(*) FROM writes").fetchone()[0] == 0
+
+
+@pytest.mark.brd("NFR-SAFE-5")
+@pytest.mark.parametrize("saved_entity", ["", "climate.other"])
+async def test_stop_does_not_read_an_obsolete_thermostat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved_entity: str
+) -> None:
+    c, ha = _controller(tmp_path, HOUSE)
+    saved = HOUSE.model_copy(
+        update={"thermostat": HOUSE.thermostat.model_copy(update={"entity_id": saved_entity})}
+    )
+    reads: list[str] = []
+    get_state = c.ha.get_state
+
+    async def record(entity_id: str) -> dict[str, object] | None:
+        reads.append(entity_id)
+        return await get_state(entity_id)
+
+    monkeypatch.setattr(c.ha, "get_state", record)
+    result, _ = await c.kill_restore(NOW, saved)
+    assert result == "failed"
+    assert not reads
+    assert not ha.calls
 
 
 @pytest.mark.brd("NFR-SAFE-5")

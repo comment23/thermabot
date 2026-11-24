@@ -53,7 +53,7 @@ def test_dashboard_shows_live_state(page: Page, srv: Srv) -> None:
     expect(page.locator("[data-testid=hvac-mode]")).to_have_text("heat")
     expect(page.locator("[data-testid=score]")).to_have_text("87")
     expect(page.locator("[data-testid=next-change]")).to_contain_text("sleep block setback")
-    expect(page.locator("[data-testid=shadow-days]")).to_contain_text("3.0 of 7")
+    expect(page.locator("[data-testid=shadow-days]")).to_contain_text("evidence")
     expect(page.locator("tr[data-room=bedroom_2]")).to_contain_text("(stale)")
     expect(page.locator("tr[data-room=bedroom_2]")).to_have_attribute("data-floor", "Second")
     expect(page.locator("tr[data-room=bedroom_2]")).to_contain_text("Second")

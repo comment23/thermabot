@@ -2,24 +2,24 @@
 {% block title %}Safety and control{% endblock %}
 {% block content %}
 <div class="page-head"><h2>Safety and control</h2>
-  <p class="meta">Stop is always one tap. Active waits until every check passes, and the server still enforces the soak.</p></div>
+  <p class="meta">Start in Watch. Control needs a separate Owner review and approval.</p></div>
 {% include "partials/settings_nav.html" %}
 <div class="mode-cards">
   <article class="card mode-card{% if mode.key == 'stopped' %} current{% endif %}" data-testid="mode-stopped">
     <h3>Stopped</h3>
-    <p>The bot does not change the thermostat. The thermostat keeps its current settings.</p>
-    {% if kill != 'on' and p.can('kill_on') %}
-    <button type="button" class="resume" data-kill="resume" data-testid="safety-resume">Resume in Shadow</button>
+    <p>The bot does not change the thermostat.</p>
+    {% if kill != 'on' and p.can('kill_on') and not stop_retry_required %}
+    <button type="button" class="resume" data-kill="resume" data-testid="safety-resume">Start watching</button>
     {% endif %}
   </article>
   <article class="card mode-card{% if mode.key == 'shadow' %} current{% endif %}" data-testid="mode-shadow">
-    <h3>Shadow</h3>
+    <h3>Watch (Shadow)</h3>
     <p>The bot plans and logs what it would send. Nothing is written to the thermostat.</p>
-    <p class="meta" data-testid="shadow-days">{{ '%.1f'|format(shadow_days) }} of {{ shadow_min_days }} days</p>
+    <p class="meta">Seven days of tracked evidence are required before control.</p>
   </article>
   <article class="card mode-card{% if mode.key == 'active' %} current{% endif %}" data-testid="mode-active">
-    <h3>Active</h3>
-    <p>The bot can write setpoints after every safety check passes.</p>
+    <h3>Control (Active)</h3>
+    <p>The bot can change the thermostat after its safety checks pass. A restart returns control to Watch.</p>
     {% if readiness %}
     <ul class="checklist" data-testid="readiness" data-ready="{{ 'yes' if readiness.ready else 'no' }}">
       {% for ch in readiness.checks %}
@@ -28,11 +28,15 @@
       </li>
       {% endfor %}
     </ul>
-    {% if readiness.first_write %}<p data-testid="first-write">First write: {{ readiness.first_write }}</p>{% endif %}
-    {% if p.can('set_active') %}
+    {% if readiness.first_write %}<p data-testid="first-write">Current planned target (may change): {{ readiness.first_write }}</p>{% endif %}
+    {% if p.can('set_active') and mode.key != 'active' %}
+    <label><input type="checkbox" id="reviewed-shadow" data-testid="reviewed-shadow" {% if not readiness.ready %}disabled{% endif %}>
+      I reviewed the seven-day Watch report, including degraded intervals and stale rooms.</label>
+    <label><input type="checkbox" id="reviewed-safety-net" data-testid="reviewed-safety-net" {% if not readiness.ready %}disabled{% endif %}>
+      I independently verified the Home Assistant safety net and understand its limits.</label>
     <label>Type ACTIVE to confirm
       <input id="active-word" data-testid="active-word" autocomplete="off" {% if not readiness.ready %}disabled{% endif %}></label>
-    <button type="button" class="contrast" data-kill="on-active" data-testid="kill-on-active" disabled>Go Active</button>
+    <button type="button" class="contrast" data-kill="on-active" data-testid="kill-on-active" disabled>Start control</button>
     {% endif %}
     {% endif %}
   </article>
@@ -47,6 +51,9 @@
 </section>
 <form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
       data-review="safety" data-settings='{{ settings_json }}' novalidate>
+  <p>Configure the Owner-approved stop comfort band below. It is separate from the schedule and
+    starts disabled. Stopping control attempts this band, but safety checks can block it; the bot
+    still stops and warns you to check the thermostat.</p>
   <p class="meta">Limits can only be tightened. A diff is shown before anything is saved.</p>
   {% include "partials/settings_fields.html" %}
   <p class="errors" data-testid="errors"></p>

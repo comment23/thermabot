@@ -264,6 +264,12 @@ class WritesCfg(BaseModel):
         return self
 
 
+class StopHandoffCfg(BaseModel):
+    enabled: bool = False
+    heat_f: float = Field(default=68, ge=HEAT_SP_MIN, le=COOL_SP_MAX, allow_inf_nan=False)
+    cool_f: float = Field(default=76, ge=COOL_SP_MIN, le=COOL_SP_MAX, allow_inf_nan=False)
+
+
 class FanCfg(BaseModel):
     max_min_per_hour: float = 30
     max_session_h: float = 2
@@ -430,6 +436,7 @@ class Settings(BaseModel):
     off: OffCfg = Field(default_factory=OffCfg)
     safety: SafetyCfg = Field(default_factory=SafetyCfg)
     writes: WritesCfg = Field(default_factory=WritesCfg)
+    stop_handoff: StopHandoffCfg = Field(default_factory=StopHandoffCfg)
     fan: FanCfg = Field(default_factory=FanCfg)
     planner: PlannerCfg = Field(default_factory=PlannerCfg)
     weather: WeatherCfg = Field(default_factory=WeatherCfg)
@@ -471,6 +478,11 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _cross_checks(self) -> Settings:
+        if (
+            self.stop_handoff.enabled
+            and self.stop_handoff.cool_f - self.stop_handoff.heat_f < self.writes.deadband_f
+        ):
+            raise ValueError("stop_handoff: cool - heat must meet the configured deadband")
         for block, ws in self.weights.items():
             for room, w in ws.items():
                 if w < 0:

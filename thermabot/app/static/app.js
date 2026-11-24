@@ -126,11 +126,34 @@
     if (!s) return '';
     if (s.label === 'SETUP NEEDED') return 'Setup needed';
     if (s.state === 'DISABLED') return 'Stopped';
-    const active = s.state === 'ACTIVE' || (s.label || '').indexOf('ACTIVE') === 0;
+    const active = s.run_mode === 'active' || s.state === 'ACTIVE' || (s.label || '').indexOf('ACTIVE') === 0;
     return active ? 'Active' : 'Shadow';
   }
   let announced = '';
   function setState(s) {
+    if (s && (s.kill_switch === 'on' || s.kill_switch === 'off')) {
+      updateKillButton(s.kill_switch, s.stop_retry_required);
+    }
+    if (s && Object.prototype.hasOwnProperty.call(s, 'stop_warning')) {
+      const notice = $('#stop-handoff-warning');
+      if (notice) {
+        notice.hidden = !s.stop_warning;
+        $('span', notice).textContent = s.stop_warning || '';
+        if (Object.prototype.hasOwnProperty.call(s, 'stop_retry_required')) {
+          const retry = $('[data-kill=retry-stop]', notice);
+          const acknowledge = $('[data-notice=stop_handoff]', notice);
+          if (retry) retry.hidden = !s.stop_retry_required;
+          if (acknowledge) acknowledge.disabled = !!s.stop_retry_required;
+        }
+      }
+    }
+    if (s && Object.prototype.hasOwnProperty.call(s, 'restart_notice')) {
+      const notice = $('#restart-shadow-notice');
+      if (notice) {
+        notice.hidden = !s.restart_notice;
+        $('span', notice).textContent = s.restart_notice || '';
+      }
+    }
     const b = $('#state-badge');
     if (!b || !s || !s.state) return;
     const text = modeText(s);
@@ -198,46 +221,60 @@
   }
 
   // ---- stop/start dialog (FR-KILL-1/3; 'kill switch' internally): reads /api/status, then POST /api/kill ----
-  function showBot(kill, mode) {
+  function updateKillButton(kill, retry) {
     const on = kill === 'on';
     const b = $('#kill-open');
     if (b) {
-      b.textContent = on ? 'Stop' : 'Resume';
+      b.textContent = on ? 'Stop' : 'Start watching';
       b.className = on ? 'stop' : 'resume';
       b.dataset.kill = on ? 'open' : 'resume';
       b.hidden = !on && b.dataset.canStart !== '1';
+      b.disabled = !on && !!retry;
     }
-    const badge = $('#state-badge');
-    if (badge && !on) {
-      const label = $('.mode-text', badge);
-      if (label) label.textContent = 'Stopped';
-      badge.dataset.mode = 'stopped';
-    } else if (badge && on) {
-      const label = $('.mode-text', badge);
-      const text = mode === 'active' ? 'Active' : 'Shadow';
-      if (label) label.textContent = text;
-      badge.dataset.mode = mode === 'active' ? 'active' : 'shadow';
-    }
+    const resume = $('[data-testid=safety-resume]');
+    if (resume) resume.disabled = !!retry;
   }
   async function openStop() {
     const dlg = $('#stop-sheet');
     const opener = document.activeElement;
     const st = await api('GET', 'api/status');
-    if (!st.ok) { toast(detail(st), 'error'); return; }
+    if (!st.ok || !st.data) {
+      $('#stop-explanation').textContent = 'Current status is unavailable. Stop will still be attempted.';
+      $('#stop-keeps').textContent = '';
+      const warning = $('#kill-off-warning');
+      warning.hidden = false;
+      warning.textContent = 'The handoff may not be confirmed. Check the thermostat after stopping.';
+      dlg._opener = opener;
+      dlg.showModal();
+      return;
+    }
     const snap = st.data.snapshot || {};
-    const units = (document.querySelector('[data-units]') || {}).dataset;
-    const u = (units && units.units) || 'F';
+    const active = st.data.kill_switch === 'on' && st.data.run_mode === 'active';
+    const band = st.data.stop_handoff || {};
+    const u = st.data.display_units || 'F';
+    const explanation = $('#stop-explanation');
+    if (active && band.enabled) {
+      explanation.textContent = 'Stopping Control will try the saved comfort band: heat '
+        + temp(band.heat_f, u) + ' and cool ' + temp(band.cool_f, u)
+        + '. Safety checks may block the handoff; the bot still stops. Check the thermostat if it is not confirmed.';
+    } else if (active) {
+      explanation.textContent = 'No stop comfort band is configured. The bot will stop without a confirmed handoff; check the thermostat.';
+    } else {
+      explanation.textContent = 'Stopping Watch will not change the thermostat.';
+    }
     const keeps = $('#stop-keeps');
     if (keeps) {
       const heat = snap.heat_sp == null ? '' : 'Heat ' + temp(snap.heat_sp, u);
       const cool = snap.cool_sp == null ? '' : 'Cool ' + temp(snap.cool_sp, u);
-      keeps.textContent = 'It keeps ' + (snap.hvac_mode || 'its current mode')
+      keeps.textContent = 'Current thermostat: ' + (snap.hvac_mode || 'mode unavailable')
         + (heat || cool ? ' · ' + [heat, cool].filter(Boolean).join(' · ') : '') + '.';
     }
     const off = snap.hvac_mode === 'off';
-    $('#kill-off-warning').hidden = !off;
-    $('#kill-restore-choices').hidden = !off;
-    $('[data-testid=kill-off]').hidden = off;
+    const warning = $('#kill-off-warning');
+    warning.hidden = !off;
+    if (off) warning.textContent = active
+      ? 'The thermostat is off. If the comfort handoff is not confirmed, it may remain off. Check the thermostat.'
+      : 'The thermostat is off. Stopping Watch will leave it off. Check the thermostat.';
     dlg._opener = opener;
     dlg.showModal();
   }
@@ -245,15 +282,38 @@
     const dlg = $('#stop-sheet');
     const res = await api('POST', 'api/kill', body);
     if (dlg && dlg.open) dlg.close();
-    if (!res.ok) { toast(detail(res), 'error'); return; }
+    if (!res.ok) { toast(detail(res), 'error'); await poll(); return; }
     setState(res.data);
-    showBot(res.data.kill_switch, res.data.run_mode);
-    toast((res.data.kill_switch === 'on'
+    const notRunning = res.data.kill_switch === 'on' && res.data.state === 'DISABLED';
+    let message = notRunning ? 'Start requested, but the bot is not running. Check status and Home Assistant.'
+      : res.data.kill_switch === 'on'
       ? (res.data.run_mode === 'active' ? 'Bot started: controlling' : 'Bot started: watching (Shadow)')
-      : 'Bot stopped')
-      + (res.data.restore ? ', restore: ' + res.data.restore : '')
-      + (res.data.mirror_ok ? '' : ', HA mirror not confirmed'),
-      res.data.restore === 'failed' ? 'error' : 'ok');
+      : 'Bot stopped';
+    if (res.data.restore === 'sent') message += '. Comfort band confirmed.';
+    else if (res.data.restore === 'not_needed') message += '. Comfort band already matched.';
+    else if (res.data.restore === 'failed') message += '. Comfort handoff not confirmed; check the thermostat.';
+    if (!res.data.mirror_ok) message += ' HA mirror not confirmed.';
+    toast(message, notRunning || res.data.restore === 'failed' || !res.data.mirror_ok ? 'error' : 'ok');
+  }
+  async function acknowledgeNotice(button) {
+    const res = await api('POST', 'api/notices/acknowledge', { kind: button.dataset.notice });
+    if (!res.ok) { toast(detail(res), 'error'); return; }
+    const section = button.closest('section');
+    if (section) section.hidden = true;
+    const refresh = button.dataset.notice === 'stop_handoff' && $('[data-testid=readiness]');
+    toast(refresh ? 'Notice acknowledged. Reload this page to update readiness.' : 'Notice acknowledged', 'ok');
+  }
+  function activeReviewed() {
+    const word = $('#active-word');
+    const shadow = $('#reviewed-shadow');
+    const net = $('#reviewed-safety-net');
+    const list = $('[data-testid=readiness]');
+    return !!(word && word.value === 'ACTIVE' && shadow && shadow.checked
+      && net && net.checked && list && list.dataset.ready === 'yes');
+  }
+  function refreshActiveButton() {
+    const btn = $('[data-testid=kill-on-active]');
+    if (btn) btn.disabled = !activeReviewed();
   }
   function refreshHome(which) {
     if (!document.getElementById('home-now') || !window.htmx) return;
@@ -304,6 +364,8 @@
   });
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-theme-toggle]')) { e.preventDefault(); toggleTheme(); return; }
+    const notice = e.target.closest('button[data-notice]');
+    if (notice) { e.preventDefault(); acknowledgeNotice(notice); return; }
     const b = e.target.closest('button[data-api]');
     if (b) { e.preventDefault(); send(b, b.dataset.api, b.dataset.body ? JSON.parse(b.dataset.body) : undefined); return; }
     const k = e.target.closest('[data-kill]');
@@ -315,19 +377,21 @@
     else if (a === 'cancel') { const dlg = $('#stop-sheet'); if (dlg) dlg.close(); }
     else if (a === 'off-band') submitKill({ enabled: false, restore: 'band' });
     else if (a === 'off-leave') submitKill({ enabled: false, restore: 'leave' });
+    else if (a === 'retry-stop') submitKill({ enabled: false });
     else if (a === 'on-active') {
       const word = $('#active-word');
-      if (word && word.value !== 'ACTIVE') { toast('Type ACTIVE to confirm', 'error'); return; }
-      const list = $('[data-testid=readiness]');
-      if (list && list.dataset.ready !== 'yes') { toast('Active stays off until every check passes', 'error'); return; }
-      submitKill({ enabled: true, mode: 'active' });
+      if (!activeReviewed()) { toast('Complete the Owner review and type ACTIVE', 'error'); return; }
+      submitKill({
+        enabled: true, mode: 'active', confirmation: word.value,
+        reviewed_shadow: true, reviewed_safety_net: true,
+      });
     }
   });
   document.addEventListener('input', (e) => {
-    if (e.target.id !== 'active-word') return;
-    const btn = $('[data-testid=kill-on-active]');
-    const list = $('[data-testid=readiness]');
-    if (btn) btn.disabled = e.target.value !== 'ACTIVE' || !list || list.dataset.ready !== 'yes';
+    if (['active-word', 'reviewed-shadow', 'reviewed-safety-net'].includes(e.target.id)) refreshActiveButton();
+  });
+  document.addEventListener('change', (e) => {
+    if (['reviewed-shadow', 'reviewed-safety-net'].includes(e.target.id)) refreshActiveButton();
   });
   document.addEventListener('close', (e) => {
     const dlg = e.target;
