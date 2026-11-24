@@ -1,5 +1,11 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.9 - 2026-11-24 (prerelease)
+
+- Include Watch-first lifecycle controls, the Owner-approved guarded Stop handoff, and
+  fail-closed handling for an unsaved Stop state. See the root changelog for application
+  behavior. Stable v0.6.8 remains blocked on the documented live SHADOW soak and Owner review.
+
 ## 0.6.8-rc.8 - 2026-11-23 (prerelease)
 
 - Start the add-on with s6 `with-contenv`, and read `/run/s6/container_environment`

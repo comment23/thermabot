@@ -147,7 +147,9 @@ class Runtime:
         self.controller.settings = saved.model_copy(
             update={"thermostat": self.controller.settings.thermostat}
         )
-        entity = self.controller.entity  # "" = not configured (v0.2.0): read nothing climate
+        entity = self.controller.entity
+        if entity != saved.thermostat.entity_id:
+            entity = ""
         try:
             st = await self.ha.get_state(entity) if entity else None
             mirror = await self.ha.get_state(MIRROR_ENTITY)
@@ -241,7 +243,10 @@ class Runtime:
             cumulative_off_h(J.load_off_windows(self.conn), now),
         )
         try:
-            await self.controller.tick(snap, step, self.ctx.live, now, guard_extra=extra)
+            control_live = self.ctx.live
+            if self.ctx.stop_unpersisted:
+                control_live = control_live.model_copy(update={"ha_mirror": "off"})
+            await self.controller.tick(snap, step, control_live, now, guard_extra=extra)
             J.track_off_window(
                 self.conn, None if th is None else th.hvac_mode, now, s.off.reevaluate_h
             )
@@ -408,11 +413,12 @@ class Runtime:
         version: int | None = None
         try:
             params, conf, version = J.active_model(self.conn, s.planner)
+            entity = self.controller.entity
+            if not entity or load_settings(self.ctx).thermostat.entity_id != entity:
+                raise RuntimeError("no matching configured thermostat; restart required")
             th = None if self.ctx.snapshot is None else self.ctx.snapshot.thermostat
-            if th is None and not self.controller.entity:
-                raise RuntimeError("no thermostat configured")
             if th is None:  # start-up replan runs before the first tick
-                st = await self.ha.get_state(self.controller.entity)
+                st = await self.ha.get_state(entity)
                 th = None if st is None else thermostat(st, now)
             if th is None or th.current_temp is None:
                 raise RuntimeError("no thermostat temperature")
@@ -861,6 +867,8 @@ def build(
         env.HA_TOKEN.get_secret_value(),
         transport=ha_transport,
         writable_entity=ctx.settings.thermostat.entity_id,
+        configured_thermostat=lambda: load_settings(ctx).thermostat.entity_id,
+        climate_write_blocked=lambda: ctx.stop_unpersisted,
     )
     controller = Controller(conn, ha, settings=ctx.settings, clock=clock)
     ctx.ha_read, ctx.ha_url = ha, env.HA_URL  # setup wizard: reads only (never the token)
@@ -921,6 +929,22 @@ def create_app(env: Env | None = None, **kw: Any) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        state = db.read_bot_state(rt.conn)
+        if state is not None and state.kill_switch == "on" and state.run_mode == "active":
+            now = rt.clock()
+            with rt.conn:
+                rt.conn.execute("BEGIN")
+                shadow = sm.to_shadow(state).model_copy(update={"shadow_started_at": now})
+                db.write_bot_state(rt.conn, shadow, by="restart", now=now)
+                db.write_kv(
+                    rt.conn,
+                    routes_api.RESTART_NOTICE_KEY,
+                    "Restart paused Active control. Start or continue Watch; a new seven-day "
+                    "review and Owner approval are required before control resumes.",
+                    now=now,
+                )
+                db.audit(rt.conn, "system", "restart_to_shadow", {}, now=now)
+            log.warning("restart returned control to SHADOW; Owner approval is required")
         persist_effective_settings(rt.ctx)  # v0.1.11 first-start row (FR-CFG-1)
         rt.ctx.started_at = rt.clock()
         await rt.apply_timezone()

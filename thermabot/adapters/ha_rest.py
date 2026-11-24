@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -97,9 +98,13 @@ class HARest:
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_s: float = 10.0,
         writable_entity: str = "",
+        configured_thermostat: Callable[[], str] | None = None,
+        climate_write_blocked: Callable[[], bool] | None = None,
     ) -> None:
         install_redaction()
         self.writable_entity = writable_entity
+        self._configured_thermostat = configured_thermostat
+        self._climate_write_blocked = climate_write_blocked
         self._http = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_s,
@@ -120,7 +125,14 @@ class HARest:
         return r
 
     # ---- reads -------------------------------------------------------------------
+    def _climate_bound(self) -> bool:
+        return self._configured_thermostat is None or (
+            bool(self.writable_entity) and self._configured_thermostat() == self.writable_entity
+        )
+
     async def get_state(self, entity_id: str) -> dict[str, Any] | None:
+        if entity_id.startswith("climate.") and not self._climate_bound():
+            raise HAError(None, "thermostat configuration changed; restart required")
         try:
             r = await self._send("GET", f"/api/states/{entity_id}")
         except HAError as e:
@@ -164,14 +176,21 @@ class HARest:
         )
 
     async def set_mirror(self, on: bool) -> None:
-        """input_boolean.thermabot_enabled (D§7.4). Caller writes the DB row first."""
+        """Set and confirm input_boolean.thermabot_enabled (D§7.4)."""
         await self._post_service(
             "input_boolean", "turn_on" if on else "turn_off", {"entity_id": MIRROR_ENTITY}
         )
+        state = await self.get_state(MIRROR_ENTITY)
+        if state is None or state.get("state") != ("on" if on else "off"):
+            raise HAError(None, "HA enable mirror was not confirmed")
 
     # ---- the one device write ----------------------------------------------------
     async def _post_service(self, domain: str, service: str, data: dict[str, Any]) -> ServiceResult:
         check_write(domain, service, data, self.writable_entity)  # before any HTTP
+        if domain == "climate" and not self._climate_bound():
+            raise WriteRefused("thermostat configuration changed; restart required")
+        if domain == "climate" and self._climate_write_blocked and self._climate_write_blocked():
+            raise WriteRefused("stop could not be saved; thermostat writes are paused")
         t0 = time.monotonic()
         r = await self._send("POST", f"/api/services/{domain}/{service}", json=data)
         return ServiceResult(status=r.status_code, ms=int((time.monotonic() - t0) * 1000))

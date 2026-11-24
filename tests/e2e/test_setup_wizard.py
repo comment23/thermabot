@@ -160,6 +160,8 @@ def run_wizard(page: Page, srv: Srv, shots: str | None = None) -> None:
     expect(page.locator("[data-testid=review-people]")).to_contain_text("alex = person.alex")
     expect(page.locator("[data-testid=review-rooms]")).to_contain_text("study")
     expect(page.locator("[data-testid=restart-note]")).to_be_visible()
+    expect(page.locator("[data-testid=restart-note]")).to_contain_text("reads and writes")
+    expect(page.locator("[data-testid=restart-note]")).to_contain_text("paused")
     if shots:
         _shot(page, f"setup-7-review-{shots}.png")
 
@@ -202,6 +204,9 @@ def test_wizard_phone(phone: Page, srv: Srv) -> None:
     _assert_saved(srv)
     phone.goto(f"{srv.url}/")
     expect(phone.locator("[data-testid=restart-banner]")).to_contain_text("climate.living_room")
+    expect(phone.locator("[data-testid=restart-banner]")).to_contain_text(
+        "reads and writes are paused"
+    )
     w = phone.evaluate("document.documentElement.scrollWidth")
     assert w <= PHONE["width"]
     assert_page_healthy(phone, srv)

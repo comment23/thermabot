@@ -148,3 +148,13 @@ def test_band_span_below_deadband_rejected() -> None:
     d["bands"]["cool"]["home"] = (71, 72)  # cool.high 72 - heat.low 70 = 2 < 3
     with pytest.raises(ValidationError, match="deadband"):
         Settings.model_validate(d)
+
+
+@pytest.mark.brd("FR-KILL-3")
+@pytest.mark.parametrize(
+    ("heat", "cool"),
+    [(59, 76), (68, 81), (72, 74), (float("nan"), 76), (68, float("inf"))],
+)
+def test_stop_handoff_rejects_unsafe_bands(heat: float, cool: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"stop_handoff": {"enabled": True, "heat_f": heat, "cool_f": cool}})

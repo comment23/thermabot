@@ -25,7 +25,6 @@ from thermabot.adapters.ha_rest import MIRROR_ENTITY, HAError, HARest, WriteRefu
 from thermabot.app.units import c_to_f_exact, delta_c_to_f, temperature_scale
 from thermabot.config import Settings
 from thermabot.core import safety, statemachine
-from thermabot.core.fallback import choose_hold_mode
 from thermabot.core.guards import GuardCtx, WriteRecord, evaluate, readable
 from thermabot.core.overrides import OVERRIDE_COMMAND_STATES, override_command_key
 from thermabot.core.schedule import block_at, next_boundary
@@ -35,6 +34,7 @@ from thermabot.core.types import (
     Decision,
     OverrideIn,
     PlanStep,
+    RestoreStatus,
     Snapshot,
     ThermostatState,
 )
@@ -333,6 +333,39 @@ def device_block_reason(action: Action, th: ThermostatState) -> str:
     return ""
 
 
+def stop_handoff_action(
+    settings: Settings, th: ThermostatState, entity: str
+) -> tuple[Action | None, str]:
+    cfg = settings.stop_handoff
+    if not cfg.enabled:
+        return None, "No Owner-approved stop comfort band is configured."
+    mode = resolve_device_mode("heat_cool", th.hvac_modes)
+    if mode is None:
+        return None, "Thermostat does not support a dual-setpoint comfort band."
+    capability_error = _capability_error(
+        th.min_temp, th.max_temp, th.target_temp_step, th.temperature_unit
+    )
+    if capability_error:
+        return None, f"Comfort handoff blocked: {capability_error}."
+    assert th.min_temp is not None and th.max_temp is not None
+    if not (th.min_temp <= cfg.heat_f <= th.max_temp and th.min_temp <= cfg.cool_f <= th.max_temp):
+        return None, "The stop comfort band is outside the thermostat's range."
+    action = align_action(
+        Action(
+            service="set_temperature",
+            entity_id=entity,
+            data={
+                "hvac_mode": mode,
+                "target_temp_low": cfg.heat_f,
+                "target_temp_high": cfg.cool_f,
+            },
+        ),
+        th,
+    )
+    reason = device_block_reason(action, th)
+    return (None, f"Comfort handoff blocked: {reason}.") if reason else (action, "")
+
+
 def action_for_device(action: Action, unit: str | None) -> Action:
     """Setpoints in the device's unit. Internal actions stay in °F."""
     if temperature_scale(unit) != "C":
@@ -421,9 +454,12 @@ class Controller:
         self.alerts: list[AlertEvent] = []
         self.recent_write_ids: dict[str, datetime] = {}  # HA context ids of our writes
         self._last_send: datetime | None = None
+        self._pending_write: WriteRecord | None = None
         self._failed_step: datetime | None = None  # plan step t that hit write_failed
         self.hold_until: datetime | None = None
         self.watchdog_last: datetime | None = None  # last_changed of WATCHDOG_LAST_ENTITY
+        self._write_lock = asyncio.Lock()
+        self._stopping = False
 
     @property
     def entity(self) -> str:
@@ -463,6 +499,8 @@ class Controller:
                 ms,
             ),
         )
+        if outcome in ("sent", "failed"):
+            self._pending_write = None
 
     def guard_context(
         self,
@@ -496,9 +534,14 @@ class Controller:
             **(guard_extra or {}),
         )
 
-    def recent_writes(self, now: datetime) -> list[WriteRecord]:
+    def recent_writes(self, now: datetime, *, include_failed: bool = False) -> list[WriteRecord]:
+        outcome_filter = (
+            "(outcome='sent' OR (outcome='failed' AND COALESCE(guard, '') != 'not_sent'))"
+            if include_failed
+            else "outcome='sent'"
+        )
         rows = self.conn.execute(
-            "SELECT ts, service, data_json FROM writes WHERE outcome='sent' AND ts >= ?",
+            f"SELECT ts, service, data_json FROM writes WHERE {outcome_filter} AND ts >= ?",
             (_iso(now - timedelta(hours=48)),),
         ).fetchall()
         return [
@@ -875,23 +918,24 @@ class Controller:
             if attempt == 2:
                 await self._sleep(RETRY_AFTER_S)
             try:
-                sent = await self._send(act, override_id=override_id)
+                async with self._write_lock:
+                    sent = await self._send(act, override_id=override_id)
+                    self._last_send = now
+                    strict = override_id is not None or (
+                        self.settings.seasonal_control.enabled and not act.safety_restore
+                    )
+                    tolerance = OVERRIDE_READBACK_TOL_F if strict else READBACK_TOL_F
+                    ok, ms = await self._readback(sent, tolerance)
+                    if ok:
+                        self._record(
+                            d.model_copy(update={"action": sent}), "sent", now, readback=True, ms=ms
+                        )
+                        if act.service == "set_preset_mode":
+                            self._mark_preset_cleared(now)
+                        return True
             except (HAError, WriteRefused, httpx.HTTPError) as e:
                 log.error("write %s failed: %s", act.service, e)
                 return self._fail(d, now, step_t, f"adapter error: {type(e).__name__}")
-            self._last_send = now
-            strict = override_id is not None or (
-                self.settings.seasonal_control.enabled and not act.safety_restore
-            )
-            tolerance = OVERRIDE_READBACK_TOL_F if strict else READBACK_TOL_F
-            ok, ms = await self._readback(sent, tolerance)
-            if ok:
-                self._record(
-                    d.model_copy(update={"action": sent}), "sent", now, readback=True, ms=ms
-                )
-                if act.service == "set_preset_mode":
-                    self._mark_preset_cleared(now)
-                return True
             log.warning("read-back mismatch for %s (attempt %d)", act.service, attempt)
         return self._fail(
             d, now, step_t, "read-back mismatch after retry" if retry else "read-back mismatch"
@@ -902,15 +946,16 @@ class Controller:
         action: Action,
         override_id: int | None,
         *,
-        check_state: bool = True,
+        allow_stopping: bool = False,
     ) -> None:
-        if not check_state:
-            return
+        if self._stopping and not allow_stopping:
+            raise WriteRefused("stop in progress")
         mirror = await self.ha.get_state(MIRROR_ENTITY)
         persisted = db.read_bot_state(self.conn)
         now = self._clock()
         if (
-            mirror is None
+            (self._stopping and not allow_stopping)
+            or mirror is None
             or mirror.get("state") != "on"
             or persisted is None
             or persisted.kill_switch != "on"
@@ -962,16 +1007,18 @@ class Controller:
         mode_wait_s: float = MODE_WAIT_S,
         *,
         override_id: int | None = None,
-        check_state: bool = True,
+        allow_stopping: bool = False,
     ) -> Action:
         """T1.44 (2026-10-05): the Trane ignores `hvac_mode` inside set_temperature when
         leaving OFF. A mode change is therefore always an explicit set_hvac_mode, confirmed by
         read-back (bounded), followed by set_temperature with the setpoints only.
 
         Returns the action that was sent, still in °F, so read-back can compare after the
-        device unit is converted back. Capability checks run even when `check_state` is
-        false (kill-switch restore skips the active-mode authorization, not the device).
+        device unit is converted back. A handoff may run while stopping, but never bypasses
+        the active-mode authorization or live device capability checks.
         """
+        if self._stopping and not allow_stopping:
+            raise WriteRefused("stop in progress")
         if act.service in ("set_fan_mode", "set_preset_mode"):
             key = "fan_mode" if act.service == "set_fan_mode" else "preset_mode"
             st0 = await self.ha.get_state(act.entity_id)
@@ -979,9 +1026,14 @@ class Controller:
             val = str(act.data.get(key) or "none")
             act = act.model_copy(update={"data": {**act.data, key: device_value(val, opts)}})
         prepared, unit = await self._require_capabilities(act)
+        if allow_stopping and prepared.data != act.data:
+            raise WriteRefused("thermostat capabilities changed during handoff")
         mode = prepared.data.get("hvac_mode")
         if prepared.service != "set_temperature" or not isinstance(mode, str):
-            await self._check_write(prepared, override_id, check_state=check_state)
+            await self._check_write(prepared, override_id, allow_stopping=allow_stopping)
+            self._pending_write = WriteRecord(
+                t=self._clock(), service=prepared.service, data=prepared.data
+            )
             await _call_service(self.ha, action_for_device(prepared, unit))
             return prepared
         st = await self.ha.get_state(prepared.entity_id)
@@ -989,7 +1041,10 @@ class Controller:
             m = Action(
                 service="set_hvac_mode", entity_id=prepared.entity_id, data={"hvac_mode": mode}
             )
-            await self._check_write(prepared, override_id, check_state=check_state)
+            await self._check_write(prepared, override_id, allow_stopping=allow_stopping)
+            self._pending_write = WriteRecord(
+                t=self._clock(), service=prepared.service, data=prepared.data
+            )
             await _call_service(self.ha, m)
             waited = 0.0
             while True:
@@ -1005,7 +1060,12 @@ class Controller:
         if sps:
             setpoint_action = prepared.model_copy(update={"data": sps})
             setpoint_action, unit = await self._require_capabilities(setpoint_action, str(mode))
-            await self._check_write(setpoint_action, override_id, check_state=check_state)
+            if allow_stopping and setpoint_action.data != sps:
+                raise WriteRefused("thermostat capabilities changed during handoff")
+            await self._check_write(setpoint_action, override_id, allow_stopping=allow_stopping)
+            self._pending_write = WriteRecord(
+                t=self._clock(), service=prepared.service, data=prepared.data
+            )
             await _call_service(self.ha, action_for_device(setpoint_action, unit))
             prepared = prepared.model_copy(
                 update={"data": {**prepared.data, **setpoint_action.data}}
@@ -1013,7 +1073,10 @@ class Controller:
         return prepared
 
     def _fail(self, d: Decision, now: datetime, step_t: datetime | None, why: str) -> bool:
-        self._record(d.model_copy(update={"reason": why}), "failed", now, readback=False)
+        guard = d.guard if self._pending_write is not None else "not_sent"
+        self._record(
+            d.model_copy(update={"reason": why, "guard": guard}), "failed", now, readback=False
+        )
         if step_t is not None:
             self._failed_step = step_t
         self.alerts.append(
@@ -1031,61 +1094,89 @@ class Controller:
             )
 
     # ---- kill-switch restore (FR-KILL-3, D§11.2) ------------------------------------
-    async def kill_restore(self, now: datetime, timeout_s: float = 4.0) -> str:
-        """One restore to the Home band when the system is `off`, sent just BEFORE the kill
-        switch goes OFF (the only write permitted as part of disabling). No retry, single
-        read-back, bounded by timeout_s so the API answers within 5 s. An unreadable initial
-        state fails without a climate write; the caller must still turn the bot OFF.
-        -> 'not_needed' | 'sent' | 'failed' | 'skipped' (no thermostat configured)."""
+    async def kill_restore(
+        self, now: datetime, settings: Settings | None = None, timeout_s: float = 3.5
+    ) -> tuple[RestoreStatus, str]:
+        """Bounded, guarded comfort handoff before disabling Active control."""
         if not self.entity:
-            return "skipped"
+            return "failed", "No thermostat is configured; check the thermostat."
+        handoff_settings = settings or self.settings
+        if handoff_settings.thermostat.entity_id != self.entity:
+            return "failed", "Thermostat configuration changed; check the thermostat and restart."
+        self._stopping = True
         try:
-            st = await asyncio.wait_for(self.ha.get_state(self.entity), timeout_s / 2)
-        except (TimeoutError, HAError, httpx.HTTPError) as e:
-            log.warning("kill restore not attempted: state read failed (%s)", type(e).__name__)
-            return "failed"
-        if st is None or st.get("state") in (None, "", "unknown", "unavailable"):
-            log.warning("kill restore not attempted: thermostat state unreadable")
-            return "failed"
-        if st.get("state") != "off":
-            return "not_needed"
-        th = thermostat(st)
-        if temperature_scale(th.temperature_unit) is None:
-            log.warning("kill restore not attempted: thermostat temperature unit is unknown")
-            return "failed"
-        b = self.settings.bands
-        lo, hi = float(b.heat.home[0]), float(b.cool.home[1])
-        choice = choose_hold_mode(th.hvac_modes, lo, hi, th.current_temp)
-        data = None if choice is None else safety._restore_data(*choice)
-        if data is None:
-            log.warning("kill restore not attempted: thermostat has no supported hold mode")
-            return "failed"
-        act = Action(
-            service="set_temperature",
-            entity_id=self.entity,
-            safety_restore=True,
-            data=data,
-        )
-        d = Decision(t=now, action=act, allowed=True, reason="kill switch: restore to band")
-        try:
-            # check_state stays false: this is the one write allowed while disabling,
-            # including from SHADOW. Capability checks still run inside _send.
-            sent = await asyncio.wait_for(
-                self._send(act, mode_wait_s=timeout_s / 4, check_state=False), timeout_s / 2
+            return await asyncio.wait_for(
+                self._handoff(now, handoff_settings, timeout_s), timeout_s
             )
-            back = await asyncio.wait_for(self.ha.get_state(self.entity), timeout_s / 4)
         except (TimeoutError, HAError, WriteRefused, httpx.HTTPError) as e:
-            self._record(
-                d.model_copy(update={"reason": f"kill restore: {type(e).__name__}"}),
+            log.warning("stop comfort handoff failed: %s", type(e).__name__)
+            return (
                 "failed",
-                now,
-                readback=False,
+                "Comfort handoff was not confirmed; the thermostat may have changed. Check it.",
             )
-            return "failed"
-        ok = readback_ok(sent, back)
-        self._record(
-            d.model_copy(update={"action": sent}), "sent" if ok else "failed", now, readback=ok
-        )
-        if ok:
+        finally:
+            self._stopping = False
+
+    async def _handoff(
+        self, now: datetime, settings: Settings, timeout_s: float
+    ) -> tuple[RestoreStatus, str]:
+        async with self._write_lock:
+            st = await self.ha.get_state(self.entity)
+            if st is None or st.get("state") in (None, "", "unknown", "unavailable"):
+                return "failed", "Thermostat state is unavailable; check the thermostat."
+            th = thermostat(st, now)
+            act, reason = stop_handoff_action(settings, th, self.entity)
+            if act is None:
+                return "failed", reason
+            mirror = await self.ha.get_state(MIRROR_ENTITY)
+            mirror_state = None if mirror is None else mirror.get("state")
+            live = statemachine.Live(
+                ha_mirror=mirror_state if mirror_state in ("on", "off") else None,
+                override_open=self.override_open(now),
+            )
+            snap = Snapshot(t=now, thermostat=th)
+            ctx = self.guard_context(snap, now, live, db.read_bot_state(self.conn))
+            recent = self.recent_writes(now, include_failed=True)
+            if self._pending_write is not None:
+                recent.append(self._pending_write)
+            ctx = ctx.model_copy(
+                update={
+                    "settings": settings.model_copy(
+                        update={"thermostat": self.settings.thermostat}
+                    ),
+                    "recent_writes": recent,
+                }
+            )
+            d = evaluate(act, ctx)
+            if d.action.data != act.data:
+                self._record(
+                    d.model_copy(update={"reason": "handoff requires a clamp"}), "denied", now
+                )
+                return "failed", "Comfort handoff needs unsafe adjustment; check its settings."
+            if not d.allowed:
+                if d.guard == "rate_limit" and d.reason == "no change vs read-back state":
+                    return "not_needed", "The thermostat already matches the stop comfort band."
+                self._record(d, "denied", now)
+                return "failed", f"Comfort handoff blocked: {d.reason}."
+            try:
+                sent = await self._send(d.action, mode_wait_s=timeout_s / 4, allow_stopping=True)
+                back = await self.ha.get_state(self.entity)
+            except (asyncio.CancelledError, HAError, WriteRefused, httpx.HTTPError) as e:
+                self._record(
+                    d.model_copy(update={"reason": f"stop handoff: {type(e).__name__}"}),
+                    "failed",
+                    now,
+                    readback=False,
+                )
+                raise
+            ok = readback_ok(sent, back, OVERRIDE_READBACK_TOL_F)
+            self._record(
+                d.model_copy(update={"action": sent, "reason": "stop comfort handoff"}),
+                "sent" if ok else "failed",
+                now,
+                readback=ok,
+            )
+            if not ok:
+                return "failed", "Comfort handoff was not confirmed; check the thermostat."
             self._last_send = now
-        return "sent" if ok else "failed"
+            return "sent", "The stop comfort band was confirmed."

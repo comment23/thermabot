@@ -267,7 +267,7 @@ def test_forms_cover_every_leaf_and_lock_owner_sections() -> None:
     assert [x.name for x in secs] == list(forms.ORDER)
     assert set(forms.ORDER) == set(Settings.model_fields) - {"openings"}
     locked = {x.name for x in secs if x.locked}
-    assert locked == {"thermostat", "safety", "off"}
+    assert locked == {"thermostat", "safety", "off", "stop_handoff"}
     paths = {f.path for x in secs for f in x.fields}
     for p in (
         "thermostat.entity_id",

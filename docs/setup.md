@@ -47,7 +47,10 @@ sign-in when no configuration exists, or opens it from the dashboard banner (or 
    (reads `GET /api/config`) and a **Test fetch** preview of the next 12 hours. See [weather.md](weather.md).
 7. **Review and save**: writes the `settings` row (`updated_by` = you). It never changes the run
    mode or the kill switch. **A new thermostat takes effect after a restart**; a banner says so
-   until then.
+   until then. Stop Control before changing or removing the thermostat. While the saved
+   thermostat differs from the running one, direct climate reads and writes are paused; restart
+   to use the new thermostat. Restoring the saved thermostat to the running one also clears the
+   mismatch. Any thermostat change restarts the seven-day Watch evidence window.
 
 The wizard only reads from Home Assistant (`GET /api/config`, `GET /api/states`, cached 15 s,
 5 s timeout). It never calls a Home Assistant service.
@@ -57,7 +60,7 @@ The wizard only reads from Home Assistant (`GET /api/config`, `GET /api/states`,
 The dashboard can pause the plan or request a temporary temperature and/or HVAC mode. Temperature
 requests use °F and require an ACTIVE bot, the enabled HA mirror, a fresh thermostat reading, and
 the normal safety and write-rate guards. Home Assistant must report the thermostat's setpoint
-range and increment; an explicitly non-Fahrenheit thermostat is not supported.
+range, increment, and a known Fahrenheit or Celsius unit.
 
 In heat/cool mode the target is the center of a range at least as wide as the configured deadband.
 The range is rounded outward to the device's increment, and safety limits may adjust it further.
@@ -77,12 +80,52 @@ The planned schedule remains paused while an override is open, including when it
 blocked or fails. Cancel it to resume planning. Cancellation cannot recall a command already
 sent to Home Assistant or undo a thermostat change.
 
-## Turning the bot off
+## Watch, control, and stop
 
-When disabling the bot, **Restore to band** only writes after Home Assistant confirms the
-thermostat is currently `off`. If that state cannot be read, restore reports `failed` and
-no climate command is sent. The bot still turns OFF, and the audit log records the restore
-failure. Check the thermostat manually if a restore was needed.
+An Owner starts the bot in **Watch (SHADOW)**. Watch records recommendations but never writes
+the thermostat. In **Safety & control**, the Owner can configure and enable a stop comfort
+band, independent of the schedule. It is disabled by default.
+If the HA enable mirror cannot be confirmed during a Watch start, the request remains enabled
+but the bot may still be stopped; Watch can begin when the mirror becomes available. Check status.
+
+Starting **Control (ACTIVE)** is a separate Owner action. The server requires:
+
+- A running, healthy Watch and a current thermostat reading and plan.
+- Seven elapsed days of tracked Watch evidence: at least 9,576 of 10,080 minute samples
+  (95%), no gaps longer than three minutes, a current sample, and no untracked or non-SHADOW
+  samples. Sent and unconfirmed thermostat writes invalidate the window.
+- A valid fitted model, configured HVAC sensors, known device capabilities, and an enabled
+  stop band compatible with the thermostat and safety limits.
+- Preliminary safety-net configuration and the Owner's explicit review of the seven-day
+  history, degraded intervals, stale rooms, and the independent Home Assistant safety net.
+  A configured heartbeat or helper alone does **not** prove that the safety net works.
+- Any previous stop warning must be checked and acknowledged before Control can start.
+
+The Owner confirms the review and types `ACTIVE`. The displayed plan is a current
+recommendation, not a guarantee of the first command. A missing day, long outage, stop,
+control interval, untracked data, or potentially sent write requires a new seven-day Watch
+window. If the HA enable mirror cannot be confirmed on, Control is not enabled. These automated
+checks do not substitute for the live-soak review or release gate.
+
+Stopping Watch makes no thermostat write, even if the thermostat is off. Stopping Control
+attempts the Owner's configured band through the normal safety guards and read-back. The
+thermostat must support a dual-setpoint `heat_cool` or `auto` mode; Celsius setpoints are
+aligned to its reported increment. Overrides, rate limits, unsupported capabilities, or
+communication failures can block or interrupt the handoff. A failed or unconfirmed handoff
+still stops the bot, but may have changed the thermostat: check its actual settings. The
+warning remains visible until an Owner or Admin acknowledges it after checking.
+A Settings or setup save waits for an in-progress start or stop to finish, so a handoff uses
+one committed configuration. An Owner can still update the stop comfort band during Control.
+If the HA enable mirror cannot be confirmed off, the bot remains stopped locally and shows
+the same persistent warning. Reload Safety & control after acknowledgement to refresh readiness.
+If Stop cannot be saved, thermostat writes are paused in the running process, the bot attempts
+to turn the HA mirror off, and an error asks you to check the thermostat and retry Stop. The
+warning cannot be acknowledged until Stop is saved; restarting does not resume Active control.
+
+The legacy API's `restore: "leave"` option cannot bypass an Active handoff. A stopped bot
+stays stopped across restart; Watch resumes as Watch; Active returns to Watch and requires
+a new seven-day evidence window and Owner approval. A restart notice remains until
+acknowledged. Neither starting Watch nor restarting authorizes thermostat control.
 
 ## Daily SHADOW report
 
@@ -111,7 +154,8 @@ save with no edits changes nothing.
 
 One form per section, generated from the `Settings` model. A save goes through `PUT /api/settings`
 and the same pydantic validation, and errors are shown next to the field. The `thermostat`,
-`safety` and `off` sections need an Owner. Owners also get a read-only JSON view under *Advanced*.
+`safety`, `off`, and `stop_handoff` sections need an Owner. Owners also get a read-only JSON view
+under *Advanced*.
 
 **Weather-aware comfort** is opt-in under Settings. Enable it and set both the home and sleep
 ranges to use those ranges in every season. Review the [weather-aware behavior and safety

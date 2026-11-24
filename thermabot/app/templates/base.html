@@ -27,7 +27,8 @@
     <span id="state-badge" class="mode-pill" data-testid="state-badge" data-state="{{ eff.state }}"
           data-mode="{{ mode.key }}" data-label="{{ eff.label }}"{% if mode.degraded %} data-degraded="{{ mode.degraded }}"{% endif %}>
       <i class="dot" aria-hidden="true"></i><span class="mode-text">{{ mode.text }}</span></span>
-    <span class="soak wide-only" data-testid="shadow-days">Shadow {{ '%.1f'|format(shadow_days) }} of {{ shadow_min_days }}</span>
+    {% if p.can('edit_safety') %}<a class="soak wide-only" href="{{ up }}settings/safety" data-testid="shadow-days">Watch evidence: review</a>
+    {% else %}<span class="soak wide-only" data-testid="shadow-days">Watch evidence: Owner review</span>{% endif %}
     <span class="health-chip wide-only" data-health="{{ ha_health }}" data-testid="ha-chip"><i class="dot" aria-hidden="true"></i>HA {{ 'down' if ha_health == 'down' else ('ok' if ha_health == 'ok' else ha_health) }}</span>
     <span class="health-chip wide-only{% if weather_stale %} warn{% endif %}" data-health="{{ 'stale' if weather_stale else 'ok' }}" data-testid="weather-chip"><i class="dot" aria-hidden="true"></i>{% if weather_stale %}Weather stale{% else %}Weather ok{% endif %}</span>
     {% if weather_stale %}<span class="sr-only" data-testid="weather-pill">Weather stale</span>{% endif %}
@@ -36,9 +37,9 @@
     {% if override %}<small class="wide-only" data-testid="override-countdown"
           data-expires="{{ override.expires_at.isoformat() }}">Override until
           {{ override.expires_at|localtime }}</small>{% endif %}
-    {% if p.can('kill_off') and (kill == 'on' or p.can('kill_on')) %}
+    {% if p.can('kill_off') %}
     <button type="button" id="kill-open" data-testid="kill-open" class="{{ 'stop' if kill == 'on' else 'resume' }}"
-      data-kill="{{ 'open' if kill == 'on' else 'resume' }}" data-can-start="{{ 1 if p.can('kill_on') else 0 }}">{{ 'Stop' if kill == 'on' else 'Resume' }}</button>
+      data-kill="{{ 'open' if kill == 'on' else 'resume' }}" data-can-start="{{ 1 if p.can('kill_on') else 0 }}"{% if kill != 'on' and not p.can('kill_on') %} hidden{% endif %}{% if stop_retry_required and kill != 'on' %} disabled{% endif %}>{{ 'Stop' if kill == 'on' else 'Start watching' }}</button>
     {% endif %}
     <button type="button" class="icon-btn" data-theme-toggle data-testid="theme-toggle"
       aria-label="Switch light/dark mode" title="Switch light/dark mode">◐</button>
@@ -61,15 +62,10 @@
 <dialog id="stop-sheet" class="sheet" data-testid="stop-sheet" aria-labelledby="stop-title"><article>
   <div class="sheet-handle" aria-hidden="true"></div>
   <h3 id="stop-title">Stop</h3>
-  <p>The bot stops changing the thermostat. The thermostat keeps its current settings.</p>
+  <p id="stop-explanation"></p>
   <p id="stop-keeps" data-testid="stop-keeps"></p>
-  <p id="kill-off-warning" class="banner" hidden>The thermostat is currently <strong>off</strong>.
-    Stopping now would leave the house unconditioned.</p>
-  <div id="kill-restore-choices" hidden>
-    <button type="button" data-kill="off-band" data-testid="kill-off-band">Restore the Home band, then stop</button>
-    <button type="button" class="secondary" data-kill="off-leave" data-testid="kill-off-leave">Leave it off and stop</button>
-  </div>
-  <button type="button" class="stop" data-kill="off-leave" data-testid="kill-off">Stop</button>
+  <p id="kill-off-warning" class="banner" hidden></p>
+  <button type="button" class="stop" data-kill="off-band" data-testid="kill-off">Stop</button>
   <footer><button type="button" class="secondary" data-kill="cancel">Cancel</button></footer>
 </article></dialog>
 {% endif %}
@@ -89,9 +85,22 @@
 {% if p %}<p id="ha-connection-warning" class="banner" role="status"{% if ha_health != 'down' %} hidden{% endif %}>
   Home Assistant is disconnected. Displayed conditions may be stale. Thermostat writes are paused
   until a fresh reading succeeds.</p>{% endif %}
+{% if p %}
+<section id="stop-handoff-warning" class="banner" role="alert" data-testid="stop-handoff-warning"{% if not stop_warning %} hidden{% endif %}>
+  <strong>Stop needs attention.</strong> <span>{{ stop_warning or '' }}</span>
+  {% if p.can('kill_off') %}
+  <button type="button" class="secondary outline" data-kill="retry-stop" data-testid="retry-stop"{% if not stop_retry_required %} hidden{% endif %}>Retry Stop</button>
+  <button type="button" class="secondary outline" data-notice="stop_handoff"{% if stop_retry_required %} disabled{% endif %}>I checked the thermostat</button>{% endif %}
+</section>
+<section id="restart-shadow-notice" class="banner" role="status" data-testid="restart-shadow-notice"{% if not restart_notice %} hidden{% endif %}>
+  <span>{{ restart_notice or '' }}</span>
+  {% if p.can('kill_off') %}<button type="button" class="secondary outline" data-notice="restart_shadow">Dismiss</button>{% endif %}
+</section>
+{% endif %}
 {% if restart_needed %}<p class="banner" data-testid="restart-banner">Restart needed: the saved
-  thermostat is <code>{{ saved_entity }}</code>{% if running_entity %}, but the running bot
-  still uses <code>{{ running_entity }}</code>{% else %}, but the running bot has none yet{% endif %}. Restart thermabot to apply it.</p>{% endif %}
+  thermostat is <code>{{ saved_entity or '(none)' }}</code>{% if running_entity %}, but the
+  runtime is bound to <code>{{ running_entity }}</code>{% else %}, but no thermostat is bound yet{% endif %}.
+  Thermostat reads and writes are paused. Restart thermabot to apply the saved configuration.</p>{% endif %}
 <div id="content" tabindex="-1">{% block content %}{% endblock %}</div>
 <footer class="app-footer"><span>thermabot <span data-testid="app-version">v{{ version }}</span></span>
   <span data-testid="home-timezone">Home time: {{ timezone }}</span>

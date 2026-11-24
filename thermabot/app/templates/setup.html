@@ -115,7 +115,8 @@ environment. Saving never changes the run mode or starts Active control.</small>
     <div data-testid="review"></div>
     <p class="banner" data-testid="restart-note" hidden>The thermostat changes from
       <code data-testid="restart-from"></code> to <code data-testid="restart-to"></code>. Restart thermabot to
-      apply it; until then the bot keeps using the old one.</p>
+      apply it. Stop Control before saving; after saving, thermostat reads and writes are paused
+      until restart.</p>
     <button type="button" data-setup="save" data-testid="setup-save">Save settings</button>
   </section>
 

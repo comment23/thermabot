@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from thermabot import __version__
 from thermabot.adapters import db
 from thermabot.app.auth import Principal, require
-from thermabot.app.routes_api import Ctx, CtxD, load_settings, settings_put
+from thermabot.app.routes_api import Ctx, CtxD, _save_settings, load_settings
 from thermabot.config import Settings
 from thermabot.core.schedule import active_zone
 
@@ -140,7 +140,7 @@ async def import_config(body: ImportRequest, request: Request, c: CtxD, p: Owner
         if body.expected_current != fingerprint(load_settings(c)):
             raise HTTPException(409, "Configuration changed; preview the file again")
         path = create_backup(c, "pre-import")
-        await settings_put(new.model_dump(mode="json"), request, c, p)
+        _save_settings(new, request, c, p)
         c.audit(p, "config_import", request, backup=path.name)
     return {
         "ok": True,

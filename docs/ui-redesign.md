@@ -7,12 +7,16 @@ The interface is a calm status screen. It answers three questions: what mode the
 Every signed-in page shows one status bar:
 
 - A mode pill: **Stopped**, **Shadow**, or **Active**. Setup needed uses the same pill in gray.
-- Shadow soak progress (`days of 7`).
+- A link to the Owner's Watch evidence review, rather than an elapsed-time-only progress claim.
 - Home Assistant and weather chips. Color is always paired with the word and a dot.
-- **Stop**, one tap that opens a sheet. The sheet says what the thermostat keeps. If the thermostat is off, the sheet asks to restore the Home band or leave it off. Resume, back to Shadow, is one tap from the status bar or the Stopped card.
+- **Stop**, one tap that opens a sheet. In Watch the sheet says no thermostat write is made;
+  in Control it shows the configured stop band and explains that safety checks may prevent
+  the handoff. **Start watching** always starts in Shadow.
 - On a phone the bar keeps the mode pill and Stop. Soak and health chips hide.
 
-The old duplicate "Bot: Watching (Shadow)" label is gone. Active is not a one-tap control. The button on Safety & control stays disabled until the readiness checklist passes, and `POST /api/kill` still returns 409 until Shadow has run for 7 days.
+Control is not a one-tap action. The button on Safety & control stays disabled until the
+readiness checklist and Owner review are complete. The server independently enforces the
+same checks and typed confirmation.
 
 ## Navigation
 
@@ -48,7 +52,14 @@ Each plan step stores tagged `factors`, the `evaluate()` `Decision`, and the ful
 
 ## Safety
 
-`GET /api/readiness` (Owner) reports soak, a fitted model, Home Assistant health, sensors, device capabilities, and the HA safety net, plus a preview of the first write. Going Active requires the checklist and the typed word `ACTIVE`. Limits on that page are the existing tighten-only settings. Saving them shows a diff and asks for the word `SAVE`.
+`GET /api/readiness` (Owner) reports tracked seven-day Watch evidence, a fitted model,
+Home Assistant health, sensors, device capabilities, the stop band, preliminary safety-net
+configuration, and a current plan. Configuration is not proof that the HA safety net works.
+Control requires the Owner's review of the history and independent safety net, plus the typed
+word `ACTIVE`. The [setup guide](setup.md#watch-control-and-stop) documents the evidence
+thresholds and restart behavior. Failed handoffs and Active-to-Watch restarts produce
+persistent notices. Limits on this page remain tighten-only; saving shows a diff and asks
+for `SAVE`.
 
 ## Sheets
 
@@ -73,4 +84,6 @@ Links stay relative to the current page, with `../` on nested routes so Home Ass
 
 ## What did not change
 
-The JSON API, session CSRF, capability checks, and the server-side Active soak gate are unchanged. Stop never requires a second confirmation beyond the sheet that states what the thermostat keeps, and it does not require typing. The thermostat write path, guards, and Fahrenheit storage are untouched.
+Session CSRF, role checks, the single guarded thermostat write path, and Fahrenheit storage
+remain in place. Stop requires no typed confirmation; it always stops the bot even when an
+Active handoff cannot be confirmed.

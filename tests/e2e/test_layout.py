@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Browser, Page, expect
 
 from tests.e2e.conftest import Srv, assert_page_healthy, login
 from thermabot.app.routes_ui import NAV
@@ -164,25 +164,117 @@ def test_kill_switch_dialog_goes_through_api(page: Page, srv: Srv) -> None:
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-KILL-1")
+def test_stop_remains_available_when_status_cannot_be_loaded(page: Page, srv: Srv) -> None:
+    login(page, srv, "ann")
+    page.route("**/api/status", lambda route: route.fulfill(status=503))
+    page.click("[data-testid=kill-open]")
+    dialog = page.locator("[data-testid=stop-sheet]")
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text("Current status is unavailable")
+    page.click("[data-testid=kill-off]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Bot stopped")
+    assert srv.ctx.eff().state == "DISABLED"
+    srv.errors.clear()  # expected failed status request
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-KILL-1")
+def test_admin_can_stop_after_owner_starts_in_another_session(
+    page: Page, srv: Srv, browser: Browser
+) -> None:
+    login(page, srv, "alex")
+    page.click("[data-testid=kill-open]")
+    page.click("[data-testid=kill-off]")
+    expect(page.locator("[data-testid=kill-open]")).to_have_text("Start watching")
+    admin = browser.new_page()
+    try:
+        login(admin, srv, "ann")
+        stop = admin.locator("[data-testid=kill-open]")
+        expect(stop).to_be_hidden()
+        page.click("[data-testid=kill-open]")
+        expect(stop).to_be_visible()
+        expect(stop).to_have_text("Stop")
+        stop.click()
+        admin.click("[data-testid=kill-off]")
+        expect(admin.locator("[data-testid=state-badge]")).to_have_attribute(
+            "data-state", "DISABLED"
+        )
+        assert srv.ctx.eff().state == "DISABLED"
+    finally:
+        admin.context.close()
+
+
+@pytest.mark.brd("FR-KILL-4")
+def test_start_does_not_claim_watch_is_running_when_mirror_fails(page: Page, srv: Srv) -> None:
+    login(page, srv, "alex")
+    page.click("[data-testid=kill-open]")
+    page.click("[data-testid=kill-off]")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
+
+    async def broken(_: bool) -> None:
+        raise ConnectionError
+
+    srv.ctx.set_mirror = broken
+    page.click("[data-testid=kill-open]")
+    toast = page.locator("[data-testid=toast]")
+    expect(toast).to_contain_text("not running")
+    expect(toast).to_have_attribute("data-kind", "error")
+    expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
+    assert srv.ctx.eff().state == "DISABLED"
+    assert_page_healthy(page, srv)
+
+
 @pytest.mark.brd("FR-KILL-3")
 @pytest.mark.parametrize("restore_result,kind", [("failed", "error"), ("sent", "ok")])
 def test_kill_restore_result_is_visible(
     page: Page, srv: Srv, restore_result: str, kind: str
 ) -> None:
+    from tests.house import HOUSE
+    from thermabot.adapters import db
+    from thermabot.config import Settings, StopHandoffCfg
+    from thermabot.core.statemachine import Persisted
     from thermabot.core.types import Snapshot, ThermostatState
 
-    async def restore(now: datetime) -> str:
-        return restore_result
+    async def restore(now: datetime, settings: Settings) -> tuple[str, str]:
+        return (
+            restore_result,
+            "Check the thermostat." if restore_result == "failed" else "Confirmed.",
+        )
 
     srv.ctx.kill_restore = restore
+    srv.ctx.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=74)}
+    )
+    now = datetime.now(UTC)
+    db.write_bot_state(
+        srv.ctx.conn,
+        Persisted(kill_switch="on", run_mode="active", shadow_started_at=now),
+        by="test",
+        now=now,
+    )
     srv.ctx.snapshot = Snapshot(t=datetime.now(UTC), thermostat=ThermostatState(hvac_mode="off"))
     login(page, srv, "ann")
     page.click("[data-testid=kill-open]")
-    page.click("[data-testid=kill-off-band]")
+    expect(page.locator("[data-testid=stop-sheet]")).to_contain_text("66°F")
+    expect(page.locator("[data-testid=stop-sheet]")).to_contain_text("74°F")
+    page.click("[data-testid=kill-off]")
     toast = page.locator("[data-testid=toast]")
-    expect(toast).to_contain_text(f"Bot stopped, restore: {restore_result}")
+    expect(toast).to_contain_text("Bot stopped")
     expect(toast).to_have_attribute("data-kind", kind)
     expect(page.locator("[data-testid=state-badge]")).to_have_attribute("data-state", "DISABLED")
+    warning = page.locator("[data-testid=stop-handoff-warning]")
+    if restore_result == "failed":
+        expect(warning).to_be_visible()
+        expect(warning).to_contain_text("Check the thermostat")
+        page.reload()
+        expect(warning).to_be_visible()
+        page.click('[data-notice="stop_handoff"]')
+        expect(warning).to_be_hidden()
+        page.reload()
+        expect(warning).to_be_hidden()
+    else:
+        expect(warning).to_be_hidden()
     assert_page_healthy(page, srv)
 
 
@@ -194,7 +286,7 @@ def test_owner_stop_then_start_buttons(page: Page, srv: Srv) -> None:
     btn.click()
     page.click("[data-testid=kill-off]")
     expect(page.locator("[data-testid=state-badge] .mode-text")).to_have_text("Stopped")
-    expect(btn).to_have_text("Resume")
+    expect(btn).to_have_text("Start watching")
     expect(btn).to_have_class("resume")
     btn.click()  # one tap back to Shadow; Active stays on the safety page
     expect(page.locator("[data-testid=toast]")).to_contain_text("Bot started")
@@ -217,7 +309,8 @@ def test_kill_dialog_warns_when_hvac_off(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
     page.click("[data-testid=kill-open]")
     expect(page.locator("#kill-off-warning")).to_be_visible()
-    expect(page.locator("[data-testid=kill-off-band]")).to_be_visible()
-    page.click("[data-testid=kill-off-band]")
-    expect(page.locator("[data-testid=toast]")).to_contain_text("restore: skipped")
+    expect(page.locator("[data-testid=stop-sheet]")).to_contain_text("will not change")
+    page.click("[data-testid=kill-off]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Bot stopped")
+    assert not [call for call in srv.ctx.mock_ha.calls if call["domain"] == "climate"]
     assert_page_healthy(page, srv)

@@ -21,6 +21,7 @@ from thermabot.adapters import db
 from thermabot.adapters.ha_rest import HARest, ServiceResult
 from thermabot.app import controller as controller_module
 from thermabot.app.controller import READBACK_POLL_S, RETRY_AFTER_S, Controller, diff, readback_ok
+from thermabot.config import StopHandoffCfg
 from thermabot.core.overrides import override_command_key
 from thermabot.core.statemachine import Live, Persisted
 from thermabot.core.types import Action, PlanStep, Snapshot, ThermostatState
@@ -875,22 +876,194 @@ async def test_unknown_unit_blocks_writes_and_does_not_restore(tmp_path: Path) -
 
 
 @pytest.mark.brd("FR-KILL-3")
-async def test_kill_restore_uses_heat_when_heat_cool_is_unsupported(tmp_path: Path) -> None:
+async def test_kill_restore_rejects_a_single_sided_hold(tmp_path: Path) -> None:
     c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(update={"stop_handoff": StopHandoffCfg(enabled=True)})
     ha.states[TSTAT]["state"] = "off"
     ha.states[TSTAT]["attributes"]["hvac_modes"] = ["off", "heat", "cool"]
     ha.states[TSTAT]["attributes"]["current_temperature"] = 60
-    assert await c.kill_restore(NOW) == "sent"
-    assert [call["service"] for call in ha.calls] == ["set_hvac_mode", "set_temperature"]
-    assert ha.calls[0]["data"]["hvac_mode"] == "heat"
-    assert ha.calls[-1]["data"]["temperature"] == 68
-    assert "target_temp_low" not in ha.calls[-1]["data"]
+    result, _ = await c.kill_restore(NOW)
+    assert result == "failed"
+    assert ha.calls == []
 
 
 @pytest.mark.brd("FR-KILL-3")
 async def test_kill_restore_fails_closed_without_a_supported_mode(tmp_path: Path) -> None:
     c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(update={"stop_handoff": StopHandoffCfg(enabled=True)})
     ha.states[TSTAT]["state"] = "off"
     ha.states[TSTAT]["attributes"]["hvac_modes"] = ["off"]
-    assert await c.kill_restore(NOW) == "failed"
+    result, _ = await c.kill_restore(NOW)
+    assert result == "failed"
     assert ha.calls == []
+
+
+@pytest.mark.brd("NFR-SAFE-10")
+async def test_handoff_respects_unconfirmed_previous_write(tmp_path: Path) -> None:
+    c, ha, _, conn = setup(tmp_path)
+    c.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=74)}
+    )
+    ha.ignore_writes = True
+    await c.tick(snap(), STEP, LIVE, NOW)
+    assert outcomes(conn) == ["failed"]
+    before = len(ha.calls)
+    ha.ignore_writes = False
+
+    result, detail = await c.kill_restore(NOW)
+
+    assert result == "failed" and "since last setpoint" in detail
+    assert len(ha.calls) == before
+
+
+@pytest.mark.brd("NFR-SAFE-5")
+async def test_handoff_does_not_clamp_owner_band_to_celsius_device_range(tmp_path: Path) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=74)}
+    )
+    attrs = ha.states[TSTAT]["attributes"]
+    attrs.update(
+        temperature_unit="°C",
+        min_temp=10,
+        max_temp=22,
+        target_temp_step=0.5,
+        current_temperature=20,
+        target_temp_low=19,
+        target_temp_high=21,
+    )
+
+    result, _ = await c.kill_restore(NOW)
+
+    assert result == "failed"
+    assert ha.calls == []
+
+
+@pytest.mark.brd("FR-KILL-3")
+async def test_handoff_does_not_claim_a_clamped_band_is_already_matched(tmp_path: Path) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=69)}
+    )
+    ha.states[TSTAT]["attributes"].update(
+        temperature_unit="°C",
+        min_temp=10,
+        max_temp=35,
+        target_temp_step=0.5,
+        current_temperature=20,
+        target_temp_low=19,
+        target_temp_high=(69.2 - 32) * 5 / 9,
+    )
+
+    result, _ = await c.kill_restore(NOW)
+
+    assert result == "failed"
+    assert ha.calls == []
+
+
+@pytest.mark.brd("FR-KILL-3")
+async def test_handoff_reports_unknown_temperature_unit(tmp_path: Path) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(update={"stop_handoff": StopHandoffCfg(enabled=True)})
+    ha.states[TSTAT]["attributes"]["temperature_unit"] = "K"
+
+    result, detail = await c.kill_restore(NOW)
+
+    assert result == "failed" and "unit" in detail.lower()
+    assert ha.calls == []
+
+
+@pytest.mark.brd("NFR-SAFE-10")
+async def test_timed_out_partial_handoff_blocks_a_second_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, ha, _, conn = setup(tmp_path)
+    c.settings = HOUSE.model_copy(update={"stop_handoff": StopHandoffCfg(enabled=True)})
+    ha.states[TSTAT]["state"] = "off"
+    ha.states[TSTAT]["attributes"].update(target_temp_low=67, target_temp_high=75)
+    get_state = c.ha.get_state
+
+    async def delayed_read(entity_id: str) -> dict[str, Any] | None:
+        if entity_id == TSTAT and ha.calls:
+            await asyncio.Event().wait()
+        return await get_state(entity_id)
+
+    monkeypatch.setattr(c.ha, "get_state", delayed_read)
+    result, _ = await c.kill_restore(NOW, timeout_s=0.1)
+    assert result == "failed"
+    assert outcomes(conn) == ["failed"]
+    assert [call["service"] for call in ha.calls] == ["set_hvac_mode"]
+
+    monkeypatch.setattr(c.ha, "get_state", get_state)
+    again, _ = await c.kill_restore(NOW)
+    assert again == "failed"
+    assert [call["service"] for call in ha.calls] == ["set_hvac_mode"]
+
+
+@pytest.mark.brd("FR-KILL-1")
+async def test_stop_blocks_a_pending_plan_before_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=74)}
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+    get_state = c.ha.get_state
+    blocked = False
+
+    async def delayed_read(entity_id: str) -> dict[str, Any] | None:
+        nonlocal blocked
+        if entity_id == TSTAT and not blocked:
+            blocked = True
+            entered.set()
+            await release.wait()
+        return await get_state(entity_id)
+
+    monkeypatch.setattr(c.ha, "get_state", delayed_read)
+    plan = asyncio.create_task(c.tick(snap(), STEP, LIVE, NOW))
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(c.kill_restore(NOW))
+    await asyncio.sleep(0)
+    release.set()
+    await plan
+    result, _ = await stop
+
+    assert result == "sent"
+    assert [call["service"] for call in ha.calls] == ["set_temperature"]
+    assert ha.calls[0]["data"]["target_temp_low"] == 66
+    assert ha.calls[0]["data"]["target_temp_high"] == 74
+
+
+@pytest.mark.brd("NFR-SAFE-10")
+async def test_stop_does_not_follow_a_partial_mode_write_with_a_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, ha, _, _ = setup(tmp_path)
+    c.settings = HOUSE.model_copy(
+        update={"stop_handoff": StopHandoffCfg(enabled=True, heat_f=66, cool_f=74)}
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+    get_state = c.ha.get_state
+    blocked = False
+
+    async def delayed_read(entity_id: str) -> dict[str, Any] | None:
+        nonlocal blocked
+        if entity_id == TSTAT and ha.calls and not blocked:
+            blocked = True
+            entered.set()
+            await release.wait()
+        return await get_state(entity_id)
+
+    monkeypatch.setattr(c.ha, "get_state", delayed_read)
+    step = PlanStep(t=NOW, hvac_mode="heat", heat_sp=67)
+    plan = asyncio.create_task(c.tick(snap(), step, LIVE, NOW))
+    await asyncio.wait_for(entered.wait(), 1)
+    stop = asyncio.create_task(c.kill_restore(NOW))
+    await asyncio.sleep(0)
+    release.set()
+    await plan
+    result, _ = await stop
+
+    assert result == "failed"
+    assert [call["service"] for call in ha.calls] == ["set_hvac_mode"]
