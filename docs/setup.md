@@ -104,7 +104,22 @@ Starting **Control (ACTIVE)** is a separate Owner action. The server requires:
 The Owner confirms the review and types `ACTIVE`. The displayed plan is a current
 recommendation, not a guarantee of the first command. A missing day, long outage, stop,
 control interval, untracked data, or potentially sent write requires a new seven-day Watch
-window. If the HA enable mirror cannot be confirmed on, Control is not enabled. These automated
+window by default. A normal update/restart while already Watching preserves the saved start
+time and samples; the update itself does not reset Watch. A long update outage can still
+fail the sampling/currentness requirements.
+
+For reviewed historical data or deliberate testing, an Owner can expand **Use existing Watch
+history or test without waiting seven days** under **Safety and control**. Select the Watch-only
+exception and give a reason of 10 to 500 characters. This waives only the seven-day evidence
+gate for that one Control start. It never rewrites history, backdates Watch, or marks the live
+soak complete. All other readiness checks, both review acknowledgements, and the typed `ACTIVE`
+confirmation remain mandatory. The server checks readiness again after confirming the HA
+mirror. The reason and actual evidence status are audited atomically before Control is saved;
+an audit failure leaves Watch unchanged. Reloading clears the selection, and a later start
+requires a new explicit exception. API clients supply the optional `watch_override_reason`
+on the existing `POST api/kill` Control-start request.
+
+If the HA enable mirror cannot be confirmed on, Control is not enabled. These automated
 checks do not substitute for the live-soak review or release gate.
 
 Stopping Watch makes no thermostat write, even if the thermostat is off. Stopping Control

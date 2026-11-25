@@ -180,7 +180,9 @@
     const readiness = $('[data-testid=readiness]');
     if (readiness && prev && prev !== s.state) {
       readiness.dataset.ready = 'no';
-      for (const id of ['reviewed-shadow', 'reviewed-safety-net']) { const el = $('#' + id); if (el) el.checked = false; }
+      readiness.dataset.readyWithoutWatch = 'no';
+      for (const id of ['reviewed-shadow', 'reviewed-safety-net', 'watch-override']) { const el = $('#' + id); if (el) el.checked = false; }
+      if ($('#watch-override-reason')) $('#watch-override-reason').value = '';
       if ($('#active-word')) $('#active-word').value = '';
       const summary = $('[data-testid=control-readiness-summary]');
       if (summary) summary.textContent = 'State changed. Refresh checks before approving Control.';
@@ -331,25 +333,40 @@
     const refresh = button.dataset.notice === 'stop_handoff' && $('[data-testid=readiness]');
     toast(refresh ? 'Notice acknowledged. Reload this page to update readiness.' : 'Notice acknowledged', 'ok');
   }
+  function watchOverrideReason() {
+    return $('#watch-override')?.checked ? $('#watch-override-reason').value.trim() : null;
+  }
+  function controlReady() {
+    const list = $('[data-testid=readiness]');
+    const reason = watchOverrideReason();
+    if (reason !== null && (reason.length < 10 || reason.length > 500)) return false;
+    return !!(list && (list.dataset.ready === 'yes' ||
+      (list.dataset.readyWithoutWatch === 'yes' && reason)));
+  }
   function activeReviewed() {
     const word = $('#active-word');
     const shadow = $('#reviewed-shadow');
     const net = $('#reviewed-safety-net');
-    const list = $('[data-testid=readiness]');
     return !!(word && word.value === 'ACTIVE' && shadow && shadow.checked
-      && net && net.checked && list && list.dataset.ready === 'yes'
+      && net && net.checked && controlReady()
       && $('#state-badge')?.dataset.mode !== 'active');
   }
   function refreshActiveButton() {
+    const reason = $('#watch-override-reason');
+    if (reason) reason.disabled = !$('#watch-override').checked;
+    const blockers = $('[data-testid=control-blockers]');
+    if (blockers) blockers.hidden = controlReady();
     const btn = $('[data-testid=kill-on-active]');
     if (btn) btn.disabled = !activeReviewed();
     const hint = $('#control-approval-hint');
     if (hint) {
-      const ready = $('[data-testid=readiness]')?.dataset.ready === 'yes';
+      const ready = controlReady();
       const active = $('#state-badge')?.dataset.mode === 'active';
       hint.textContent = active ? 'Control is running. Use Stop thermabot to end control.'
-        : !ready ? 'Resolve the readiness blockers, then refresh the checks.'
-        : activeReviewed() ? 'Ready for your approval. Starting Control can change the thermostat.'
+        : !ready ? 'Resolve readiness blockers, or explain an explicit Watch-only exception, then refresh checks.'
+        : activeReviewed() ? (watchOverrideReason()
+          ? 'Watch exception selected for this start. Control can change the thermostat; your reason will be audited.'
+          : 'Ready for your approval. Starting Control can change the thermostat.')
         : 'Complete both acknowledgements and type ACTIVE to enable Start control.';
     }
   }
@@ -360,6 +377,7 @@
     if (!res.ok) { toast(detail(res), 'error'); return; }
     const list = $('[data-testid=readiness]');
     list.dataset.ready = res.data.ready ? 'yes' : 'no';
+    list.dataset.readyWithoutWatch = res.data.ready_without_watch ? 'yes' : 'no';
     for (const check of res.data.checks) {
       const row = list.querySelector(`[data-check="${CSS.escape(check.id)}"]`);
       if (!row) continue;
@@ -457,14 +475,15 @@
       submitKill({
         enabled: true, mode: 'active', confirmation: word.value,
         reviewed_shadow: true, reviewed_safety_net: true,
+        watch_override_reason: watchOverrideReason(),
       });
     }
   });
   document.addEventListener('input', (e) => {
-    if (['active-word', 'reviewed-shadow', 'reviewed-safety-net'].includes(e.target.id)) refreshActiveButton();
+    if (['active-word', 'reviewed-shadow', 'reviewed-safety-net', 'watch-override', 'watch-override-reason'].includes(e.target.id)) refreshActiveButton();
   });
   document.addEventListener('change', (e) => {
-    if (['reviewed-shadow', 'reviewed-safety-net'].includes(e.target.id)) refreshActiveButton();
+    if (['reviewed-shadow', 'reviewed-safety-net', 'watch-override'].includes(e.target.id)) refreshActiveButton();
   });
   document.addEventListener('close', (e) => {
     const dlg = e.target;

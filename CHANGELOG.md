@@ -5,6 +5,21 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.11 - 2026-11-25 (prerelease)
+
+The Home Assistant add-on catalog version is `0.6.8-rc.11`. The in-app version remains
+`0.6.8`. Updating does not enable Control. Stable v0.6.8 remains blocked on the seven-day
+SHADOW soak and Owner review; the testing exception below does not satisfy that release gate.
+
+- Add an Owner-only exception to the seven-day Watch evidence gate for one explicit Control
+  start, for reviewed historical data or deliberate testing. Require a reason of 10 to 500
+  characters and record it with the actual evidence status atomically before saving Control.
+- Keep every other readiness check, both review acknowledgements, typed `ACTIVE` confirmation,
+  HA mirror confirmation, device limits, and guarded thermostat write path mandatory.
+- Clear the exception selection on reload or state change. Never backdate Watch, rewrite
+  historical samples, or persist a standing bypass. Normal updates while already Watching
+  retain the saved Watch start and samples; actual interruptions can still invalidate evidence.
+
 ## 0.6.8-rc.10 - 2026-11-25 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.10`. The in-app version remains

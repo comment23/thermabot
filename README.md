@@ -13,7 +13,7 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.10](CHANGELOG.md#068-rc10---2026-11-25-prerelease) | Prerelease; stable release remains blocked on the live soak and Owner review |
+| Prerelease | [v0.6.8-rc.11](CHANGELOG.md#068-rc11---2026-11-25-prerelease) | Prerelease; stable release remains blocked on the live soak and Owner review |
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -28,8 +28,10 @@ authorize enabling thermostat control. See [CHANGELOG.md](CHANGELOG.md) for rele
 - The kill switch is off and the run mode defaults to **SHADOW**. SHADOW simulates decisions
   and sends no thermostat writes.
 - Starting always enters Watch/SHADOW. Control/ACTIVE requires a separate Owner review and
-  seven days of tracked evidence. An ACTIVE restart returns to Watch and requires a new
-  seven-day window and Owner approval.
+  seven days of tracked evidence by default. An Owner can explicitly waive only that evidence
+  gate for one Control start with an audited testing/history-review reason; all other safeguards
+  still apply. An ACTIVE restart returns to Watch and requires a new review. This exception
+  never certifies the live-soak release gate.
 - Stopping Watch makes no thermostat write. Stopping Control attempts an Owner-configured
   comfort band, but still stops and warns if the guarded handoff cannot be confirmed.
   See [Watch, control, and stop](docs/setup.md#watch-control-and-stop).
@@ -90,7 +92,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on supports **amd64** and **aarch64**. Home Assistant pulls a prebuilt image
 (`ghcr.io/comment23/thermabot-addon-amd64` or `ghcr.io/comment23/thermabot-addon-aarch64`,
-tag `0.6.8-rc.10`) and does not compile the add-on on the device. CI publishes those images
+tag `0.6.8-rc.11`) and does not compile the add-on on the device. CI publishes those images
 from the default branch. A git tag is not required to install. Wait until that publish
 succeeds, and until the packages are public, before installing or updating. Bump the
 add-on `version` to ship a later image; Home Assistant will not re-pull an existing tag.
@@ -99,7 +101,7 @@ only for `v*` tags. Compose does not use it.
 
 The public source snapshot is a prerelease, not a stable production release. The in-app
 version is the application version (`0.6.8`); the Home Assistant add-on catalog marks
-this build as `0.6.8-rc.10`. See [first-run setup](docs/setup.md) for the wizard and
+this build as `0.6.8-rc.11`. See [first-run setup](docs/setup.md) for the wizard and
 operating details.
 
 ### Docker Compose (fallback)

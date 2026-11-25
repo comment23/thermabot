@@ -119,6 +119,10 @@ CONTROL_APPROVAL = {
     "reviewed_shadow": True,
     "reviewed_safety_net": True,
 }
+WATCH_OVERRIDE = {
+    **CONTROL_APPROVAL,
+    "watch_override_reason": "Reviewed historical Watch data before testing this update.",
+}
 
 
 @pytest.mark.brd("FR-KILL-3")
@@ -624,6 +628,153 @@ def test_active_blocked_before_7_days(tmp_path: Path) -> None:
     r = c.post("/api/kill", json={"enabled": True, "mode": "active"}, headers=h)
     assert r.status_code == 409
     assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_owner_watch_override_is_audited_and_not_reused(tmp_path: Path) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    ctx.conn.execute("DELETE FROM samples")
+    db.write_bot_state(
+        ctx.conn,
+        Persisted(kill_switch="on", run_mode="shadow", shadow_started_at=NOW),
+        by="test",
+        now=NOW,
+    )
+    headers = login(c, "alex")
+    readiness = c.get("/api/readiness").json()
+    assert not readiness["ready"] and readiness["ready_without_watch"]
+    assert c.post("/api/kill", json=CONTROL_APPROVAL, headers=headers).status_code == 409
+    response = c.post("/api/kill", json=WATCH_OVERRIDE, headers=headers)
+    assert response.status_code == 200 and response.json()["run_mode"] == "active"
+    audit = ctx.conn.execute(
+        "SELECT actor,detail_json FROM audit WHERE action='kill_on' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert audit["actor"] == "alex"
+    detail = json.loads(audit["detail_json"])
+    assert detail["watch_override_reason"] == WATCH_OVERRIDE["watch_override_reason"]
+    assert "0.0 d" in detail["watch_evidence"]
+    assert ctx.conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0] == 0
+    assert climate_calls(ha) == []
+    assert c.post("/api/kill", json={"enabled": False}, headers=headers).status_code == 200
+    assert (
+        c.post("/api/kill", json={"enabled": True, "mode": "shadow"}, headers=headers).status_code
+        == 200
+    )
+    assert c.post("/api/kill", json=CONTROL_APPROVAL, headers=headers).status_code == 409
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+
+
+@pytest.mark.brd("FR-MODE-3")
+@pytest.mark.parametrize(
+    "problem", ["no_model", "unconfigured", "stale_tick", "no_handoff", "no_net", "no_review"]
+)
+def test_watch_override_preserves_other_control_gates(tmp_path: Path, problem: str) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    ctx.conn.execute("DELETE FROM samples")
+    body = dict(WATCH_OVERRIDE)
+    if problem == "no_model":
+        ctx.conn.execute("DELETE FROM models")
+    elif problem == "unconfigured":
+        ctx.settings = ctx.settings.model_copy(update={"thermostat": Settings().thermostat})
+    elif problem == "stale_tick":
+        ctx.last_tick = NOW - timedelta(minutes=4)
+    elif problem == "no_handoff":
+        ctx.settings = HOUSE
+    elif problem == "no_net":
+        ctx.heartbeat_configured = False
+    elif problem == "no_review":
+        body["reviewed_safety_net"] = False
+    response = c.post("/api/kill", json=body, headers=login(c, "alex"))
+    assert response.status_code == 409, response.json()
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+    assert climate_calls(ha) == []
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_watch_override_rechecks_after_mirror_enable(tmp_path: Path) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    ctx.conn.execute("DELETE FROM samples")
+
+    async def lose_readiness(_: bool) -> None:
+        ctx.heartbeat_configured = False
+
+    ctx.set_mirror = lose_readiness
+    response = c.post("/api/kill", json=WATCH_OVERRIDE, headers=login(c, "alex"))
+    assert response.status_code == 409
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+    assert climate_calls(ha) == []
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_watch_override_cannot_enable_control_without_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    ctx.conn.execute("DELETE FROM samples")
+    headers = login(c, "alex")
+    audit = db.audit
+
+    def fail_override_audit(
+        conn: sqlite3.Connection, actor: str, action: str, detail: dict[str, object], **kw: Any
+    ) -> None:
+        if action == "watch_override":
+            raise sqlite3.OperationalError("simulated audit failure")
+        audit(conn, actor, action, detail, **kw)
+
+    monkeypatch.setattr(db, "audit", fail_override_audit)
+    with pytest.raises(sqlite3.OperationalError, match="simulated audit failure"):
+        c.post("/api/kill", json=WATCH_OVERRIDE, headers=headers)
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+    assert climate_calls(ha) == []
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_watch_evidence_survives_database_reopen(tmp_path: Path) -> None:
+    ctx, _, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    state = db.read_bot_state(ctx.conn)
+    assert shadow_evidence(ctx, state, NOW)[0]
+    path = ctx.conn.execute("PRAGMA database_list").fetchone()["file"]
+    ctx.conn.close()
+    ctx.conn = db.open_db(path, now=NOW)
+    ctx.auth.conn = ctx.conn
+    assert db.read_bot_state(ctx.conn) == state
+    assert shadow_evidence(ctx, db.read_bot_state(ctx.conn), NOW)[0]
+    assert c.post("/api/kill", json=CONTROL_APPROVAL, headers=login(c, "alex")).status_code == 200
+    assert (
+        ctx.conn.execute("SELECT COUNT(*) FROM audit WHERE action='watch_override'").fetchone()[0]
+        == 0
+    )
+
+
+@pytest.mark.brd("NFR-SEC-1")
+@pytest.mark.parametrize("user", ["ann", "jordan"])
+def test_watch_override_requires_owner(tmp_path: Path, user: str) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    response = c.post("/api/kill", json=WATCH_OVERRIDE, headers=login(c, user))
+    assert response.status_code == 403
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+    assert ha.calls == []
+
+
+@pytest.mark.brd("FR-MODE-3")
+@pytest.mark.parametrize("reason", ["", " " * 20, "too short", "x" * 501, True])
+def test_watch_override_requires_valid_reason(tmp_path: Path, reason: object) -> None:
+    ctx, ha, c, _ = wire(tmp_path)
+    ready_for_control(ctx)
+    response = c.post(
+        "/api/kill",
+        json={**CONTROL_APPROVAL, "watch_override_reason": reason},
+        headers=login(c, "alex"),
+    )
+    assert response.status_code == 422
+    assert db.read_bot_state(ctx.conn).run_mode == "shadow"
+    assert ha.calls == []
 
 
 @pytest.mark.brd("FR-MODE-3")

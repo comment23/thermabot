@@ -17,7 +17,8 @@
       {% if blocked %}<strong>{{ blocked[0].label }}</strong> {{ blocked[0].detail }}{% endif %}
     </p>
     <details class="readiness-details"><summary>View all automatic checks</summary>
-    <ul class="checklist" data-testid="readiness" data-ready="{{ 'yes' if readiness.ready else 'no' }}">
+    <ul class="checklist" data-testid="readiness" data-ready="{{ 'yes' if readiness.ready else 'no' }}"
+        data-ready-without-watch="{{ 'yes' if readiness.ready_without_watch else 'no' }}">
       {% for ch in readiness.checks %}
       <li class="check-row" data-ok="{{ 'yes' if ch.ok else 'no' }}" data-check="{{ ch.id }}">
         <span class="check-result">{{ 'Passed' if ch.ok else 'Needs attention' }}</span>
@@ -33,7 +34,8 @@
   </section>
   <section class="card owner-review">
     <h3>2. Owner review and approval</h3>
-    <p>You can complete your acknowledgements here. They do not override the readiness checks.</p>
+    <p>You can complete your acknowledgements here. Only the explicit Watch exception below
+      can waive the seven-day evidence gate; every other readiness check must pass.</p>
     {% if readiness %}
     <div class="banner" data-testid="control-blockers"{% if readiness.ready %} hidden{% endif %}>
       <strong>Control is not ready yet.</strong>
@@ -44,10 +46,23 @@
     </div>
     <p data-testid="first-write"{% if not readiness.first_write %} hidden{% endif %}>Current planned target (may change): {{ readiness.first_write or '' }}</p>
     {% if p.can('set_active') and mode.key != 'active' %}
+    <details>
+      <summary>Use existing Watch history or test without waiting seven days</summary>
+      <p>Updates keep saved history. A stop, Control interval, or incomplete tracking can still
+        invalidate continuous Watch evidence. This Owner-only exception applies to this Control
+        start, is recorded with your reason, and does not certify a completed live soak.</p>
+      <label class="review-check" for="watch-override"><input type="checkbox" id="watch-override" data-testid="watch-override">
+        <span>Waive only the seven-day Watch gate for this start. I accept the testing risk.</span></label>
+      <label for="watch-override-reason">Reason (10 to 500 characters; saved in the audit log)
+        <textarea id="watch-override-reason" data-testid="watch-override-reason"
+                  minlength="10" maxlength="500" disabled></textarea></label>
+      <p>All device limits, current readings, model, stop band, safety net, and confirmations
+        remain required. Reloading clears this selection; it is not a permanent bypass.</p>
+    </details>
     <fieldset class="review-acknowledgements">
     <legend>Your acknowledgements</legend>
     <label class="review-check" for="reviewed-shadow"><input type="checkbox" id="reviewed-shadow" data-testid="reviewed-shadow">
-      <span>I reviewed the seven-day Watch report, including degraded intervals and stale rooms.</span></label>
+      <span>I reviewed the available Watch history, including degraded intervals and stale rooms.</span></label>
     <label class="review-check" for="reviewed-safety-net"><input type="checkbox" id="reviewed-safety-net" data-testid="reviewed-safety-net">
       <span>I independently verified the Home Assistant safety net and understand its limits.</span></label>
     </fieldset>

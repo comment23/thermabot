@@ -249,6 +249,16 @@ class KillIn(BaseModel):
     confirmation: Literal["ACTIVE"] | None = None
     reviewed_shadow: StrictBool = False
     reviewed_safety_net: StrictBool = False
+    watch_override_reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("watch_override_reason")
+    @classmethod
+    def validate_watch_override_reason(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+            if len(value) < 10:
+                raise ValueError("Explain the Watch exception in at least 10 characters.")
+        return value
 
 
 RestoreStatus = Literal["sent", "failed", "not_needed", "skipped"]

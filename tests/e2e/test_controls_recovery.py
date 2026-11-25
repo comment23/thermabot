@@ -57,7 +57,7 @@ def test_owner_can_review_before_ready_without_bypassing_control_gate(page: Page
     expect(page.locator("[data-testid=readiness]")).to_have_attribute("data-ready", "no")
     expect(page.locator("[data-testid=reviewed-shadow]")).to_be_enabled()
     page.get_by_label(
-        "I reviewed the seven-day Watch report, including degraded intervals and stale rooms."
+        "I reviewed the available Watch history, including degraded intervals and stale rooms."
     ).check()
     page.get_by_label(
         "I independently verified the Home Assistant safety net and understand its limits."
@@ -92,6 +92,61 @@ def test_control_requires_review_in_the_browser(page: Page, srv: Srv) -> None:
     button.click()
     expect(page.locator("[data-testid=toast]")).to_contain_text("controlling")
     assert srv.ctx.eff().state == "ACTIVE"
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_owner_can_waive_watch_once_but_not_other_checks(page: Page, srv: Srv) -> None:
+    from tests.integration.test_kill_api import NOW, ready_for_control
+
+    srv.ctx.clock = lambda: NOW
+    srv.ctx.last_tick = NOW
+    ready_for_control(srv.ctx)
+    srv.ctx.conn.execute("DELETE FROM samples")
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/safety")
+    page.get_by_text("Use existing Watch history or test without waiting seven days").click()
+    page.check("[data-testid=reviewed-shadow]")
+    page.check("[data-testid=reviewed-safety-net]")
+    page.fill("[data-testid=active-word]", "ACTIVE")
+    button = page.locator("[data-testid=kill-on-active]")
+    expect(button).to_be_disabled()
+    expect(page.locator("[data-testid=watch-override-reason]")).to_be_disabled()
+    page.check("[data-testid=watch-override]")
+    page.fill("[data-testid=watch-override-reason]", " ")
+    expect(button).to_be_disabled()
+    page.fill(
+        "[data-testid=watch-override-reason]", "Reviewed existing history for update testing."
+    )
+    expect(button).to_be_enabled()
+    srv.ctx.heartbeat_configured = False
+    page.click("[data-readiness-refresh]")
+    expect(button).to_be_disabled()
+    srv.ctx.heartbeat_configured = True
+    page.click("[data-readiness-refresh]")
+    expect(button).to_be_enabled()
+    page.reload()
+    expect(page.locator("[data-testid=watch-override]")).not_to_be_checked()
+    expect(page.locator("[data-testid=watch-override-reason]")).to_have_value("")
+    expect(button).to_be_disabled()
+    page.get_by_text("Use existing Watch history or test without waiting seven days").click()
+    page.check("[data-testid=watch-override]")
+    page.fill(
+        "[data-testid=watch-override-reason]", "Reviewed existing history for update testing."
+    )
+    page.check("[data-testid=reviewed-shadow]")
+    page.check("[data-testid=reviewed-safety-net]")
+    page.fill("[data-testid=active-word]", "ACTIVE")
+    button.click()
+    expect(page.locator("[data-testid=toast]")).to_contain_text("controlling")
+    assert srv.ctx.eff().state == "ACTIVE"
+    assert (
+        srv.ctx.conn.execute("SELECT COUNT(*) FROM audit WHERE action='watch_override'").fetchone()[
+            0
+        ]
+        == 1
+    )
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
     assert_page_healthy(page, srv)
 
 
