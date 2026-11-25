@@ -166,9 +166,19 @@ def turn_off(p: Persisted | None, now: datetime) -> Persisted:
     return p.model_copy(update={"kill_switch": "off", "disabled_since": now})
 
 
-def turn_on(p: Persisted | None, mode: Literal["shadow", "active"], now: datetime) -> Persisted:
-    """ON always names SHADOW or ACTIVE. ACTIVE requires >= SHADOW_MIN_DAYS d of SHADOW (raises).
-    The SHADOW clock restarts only after > 24 h DISABLED (or no clock yet)."""
+def turn_on(
+    p: Persisted | None,
+    mode: Literal["shadow", "active"],
+    now: datetime,
+    *,
+    watch_override: bool = False,
+) -> Persisted:
+    """ACTIVE requires seven Watch days unless the Owner explicitly waives that gate.
+    A waiver requires a running Watch and never changes the recorded Watch start."""
+    if watch_override and (
+        mode != "active" or p is None or p.kill_switch != "on" or p.run_mode != "shadow"
+    ):
+        raise ValueError("A Watch exception requires a running Watch and an Active start.")
     started = p.shadow_started_at if p else None
     long_off = (
         p is None
@@ -181,7 +191,7 @@ def turn_on(p: Persisted | None, mode: Literal["shadow", "active"], now: datetim
         started = now
     if mode == "active":
         days = 0.0 if started is None else (now - started).total_seconds() / 86400
-        if days < SHADOW_MIN_DAYS:
+        if days < SHADOW_MIN_DAYS and not watch_override:
             raise ValueError(f"ACTIVE needs {SHADOW_MIN_DAYS} d of SHADOW ({days:.1f} d so far)")
     return Persisted(
         kill_switch="on",

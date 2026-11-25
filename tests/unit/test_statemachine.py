@@ -91,6 +91,15 @@ class TestShadowGate:
     def test_back_to_shadow_keeps_clock(self) -> None:
         assert to_shadow(ON_ACTIVE).shadow_started_at == ON_ACTIVE.shadow_started_at
 
+    @pytest.mark.brd("FR-MODE-3")
+    def test_explicit_watch_override_keeps_real_clock(self) -> None:
+        state = turn_on(ON_SHADOW, "active", NOW, watch_override=True)
+        assert state.run_mode == "active" and state.shadow_started_at == NOW
+        with pytest.raises(ValueError):
+            turn_on(None, "active", NOW, watch_override=True)
+        with pytest.raises(ValueError):
+            turn_on(turn_off(ON_SHADOW, NOW), "active", NOW, watch_override=True)
+
 
 @pytest.mark.brd("FR-OVR-3")
 def test_external_change() -> None:

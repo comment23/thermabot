@@ -1,5 +1,15 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.11 - 2026-11-25 (prerelease)
+
+- Add a one-start, Owner-only Watch-evidence exception under Safety and control for reviewed
+  history or testing, with a required audited reason. All other Control readiness checks,
+  review acknowledgements, typed confirmation, and thermostat write safeguards remain enforced.
+- Preserve historical data and normal Watch-update continuity. The exception is not retained
+  on reload and does not mark the live soak complete or enable Control automatically.
+- The in-app version remains `0.6.8`. Stable v0.6.8 remains blocked on the documented live
+  SHADOW soak and Owner review.
+
 ## 0.6.8-rc.10 - 2026-11-25 (prerelease)
 
 - Add explicit Start watching and Stop thermabot controls, clickable Owner acknowledgements,

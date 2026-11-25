@@ -283,6 +283,7 @@ class ReadyCheck(BaseModel):
 
 class ReadinessOut(BaseModel):
     ready: bool
+    ready_without_watch: bool
     checks: list[ReadyCheck]
     first_write: str | None = None
 
@@ -523,7 +524,12 @@ def readiness_of(c: Ctx) -> ReadinessOut:
         )
         if nxt is not None:
             first = action_sentence(nxt, s.display.units)
-    return ReadinessOut(ready=all(ch.ok for ch in checks), checks=checks, first_write=first)
+    return ReadinessOut(
+        ready=all(ch.ok for ch in checks),
+        ready_without_watch=all(ch.ok for ch in checks if ch.id != "soak"),
+        checks=checks,
+        first_write=first,
+    )
 
 
 @router.get("/api/readiness", response_model=ReadinessOut)
@@ -767,6 +773,9 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
     cur = db.read_bot_state(c.conn)
     restore: RestoreStatus | None = None
     restore_detail: str | None = None
+    watch_evidence: str | None = None
+    if body.watch_override_reason is not None and not (body.enabled and body.mode == "active"):
+        raise HTTPException(422, "A Watch exception applies only to one Control start.")
     if body.enabled:
         if not p.can("kill_on"):
             raise HTTPException(403, "needs kill_on")
@@ -778,7 +787,9 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
             raise HTTPException(403, "needs set_active")
         if body.mode == "active":
             readiness = readiness_of(c)
-            if not readiness.ready:
+            if not readiness.ready and not (
+                body.watch_override_reason is not None and readiness.ready_without_watch
+            ):
                 why = "; ".join(check.detail for check in readiness.checks if not check.ok)
                 c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
                 raise HTTPException(409, f"Control unavailable: {why}")
@@ -794,7 +805,9 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
                 c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
                 raise HTTPException(409, why)
         try:
-            new = sm.turn_on(cur, body.mode, now)
+            new = sm.turn_on(
+                cur, body.mode, now, watch_override=body.watch_override_reason is not None
+            )
         except ValueError as e:
             c.audit(p, "kill_on_denied", request, mode=body.mode, why=str(e))
             raise HTTPException(409, str(e)) from e
@@ -812,10 +825,13 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
                     503, "Control was not enabled; check the Home Assistant enable mirror."
                 ) from e
             readiness = readiness_of(c)
-            if not readiness.ready:
+            if not readiness.ready and not (
+                body.watch_override_reason is not None and readiness.ready_without_watch
+            ):
                 why = "; ".join(check.detail for check in readiness.checks if not check.ok)
                 c.audit(p, "kill_on_denied", request, mode=body.mode, why=why)
                 raise HTTPException(409, f"Control unavailable: {why}")
+            watch_evidence = next(check.detail for check in readiness.checks if check.id == "soak")
             new = new.model_copy(update={"shadow_started_at": None})
     else:
         previous_warning: str | None = None
@@ -912,7 +928,17 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
                 else:
                     c.stop_unpersisted = False
     if body.enabled:
-        db.write_bot_state(c.conn, new, by=p.username, now=now)
+        with c.conn:
+            c.conn.execute("BEGIN")
+            if body.watch_override_reason is not None:
+                c.audit(
+                    p,
+                    "watch_override",
+                    request,
+                    reason=body.watch_override_reason,
+                    watch_evidence=watch_evidence,
+                )
+            db.write_bot_state(c.conn, new, by=p.username, now=now)
     mirror_ok = True
     try:
         if not (body.enabled and body.mode == "active"):
@@ -960,6 +986,8 @@ async def _kill(body: KillIn, request: Request, c: Ctx, p: Principal) -> KillOut
         mirror_ok=mirror_ok,
         reviewed_shadow=body.reviewed_shadow if body.mode == "active" else None,
         reviewed_safety_net=body.reviewed_safety_net if body.mode == "active" else None,
+        watch_override_reason=body.watch_override_reason,
+        watch_evidence=watch_evidence,
     )
     eff = c.eff()
     c.broker.publish(
