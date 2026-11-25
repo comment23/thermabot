@@ -51,6 +51,28 @@ def test_mode_switch_keeps_active_soak_gate(page: Page, srv: Srv) -> None:
 
 
 @pytest.mark.brd("FR-MODE-3")
+def test_owner_can_review_before_ready_without_bypassing_control_gate(page: Page, srv: Srv) -> None:
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/safety")
+    expect(page.locator("[data-testid=readiness]")).to_have_attribute("data-ready", "no")
+    expect(page.locator("[data-testid=reviewed-shadow]")).to_be_enabled()
+    page.get_by_label(
+        "I reviewed the seven-day Watch report, including degraded intervals and stale rooms."
+    ).check()
+    page.get_by_label(
+        "I independently verified the Home Assistant safety net and understand its limits."
+    ).check()
+    page.fill("[data-testid=active-word]", "ACTIVE")
+    expect(page.locator("[data-testid=kill-on-active]")).to_be_disabled()
+    expect(page.locator("[data-testid=control-blockers]")).to_contain_text(
+        "Seven-day Watch evidence"
+    )
+    assert srv.ctx.eff().state == "SHADOW"
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-MODE-3")
 def test_control_requires_review_in_the_browser(page: Page, srv: Srv) -> None:
     from tests.integration.test_kill_api import NOW, ready_for_control
 
@@ -70,6 +92,33 @@ def test_control_requires_review_in_the_browser(page: Page, srv: Srv) -> None:
     button.click()
     expect(page.locator("[data-testid=toast]")).to_contain_text("controlling")
     assert srv.ctx.eff().state == "ACTIVE"
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-MODE-3")
+def test_refresh_readiness_preserves_review_and_rechecks_blockers(page: Page, srv: Srv) -> None:
+    from tests.integration.test_kill_api import NOW, ready_for_control
+
+    srv.ctx.clock = lambda: NOW
+    srv.ctx.last_tick = NOW
+    ready_for_control(srv.ctx)
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/safety")
+    page.check("[data-testid=reviewed-shadow]")
+    page.check("[data-testid=reviewed-safety-net]")
+    page.fill("[data-testid=active-word]", "ACTIVE")
+    expect(page.locator("[data-testid=kill-on-active]")).to_be_enabled()
+    srv.ctx.ha_health = "down"
+    page.click("[data-readiness-refresh]")
+    expect(page.locator("[data-testid=readiness]")).to_have_attribute("data-ready", "no")
+    expect(page.locator("[data-testid=kill-on-active]")).to_be_disabled()
+    expect(page.locator("[data-testid=reviewed-shadow]")).to_be_checked()
+    expect(page.locator("[data-testid=reviewed-safety-net]")).to_be_checked()
+    srv.ctx.ha_health = "ok"
+    page.click("[data-readiness-refresh]")
+    expect(page.locator("[data-testid=kill-on-active]")).to_be_enabled()
+    assert srv.ctx.eff().state == "SHADOW"
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
     assert_page_healthy(page, srv)
 
 

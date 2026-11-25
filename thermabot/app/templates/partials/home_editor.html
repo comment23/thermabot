@@ -1,0 +1,33 @@
+<section class="card home-editor" data-home-editor data-can-discover="{{ 1 if p.can('edit_safety') else 0 }}"
+         data-assigned-rooms='{{ assigned_rooms|default([])|tojson }}' aria-label="Floors, rooms and equipment">
+  <div class="card-head">
+    <div><p class="eyebrow">YOUR HOME</p><h3>Floors, rooms and equipment</h3></div>
+    <div class="editor-actions">
+      <button type="button" data-home-add="floor" class="secondary outline">Add floor</button>
+      <button type="button" data-home-add="room" data-testid="add-room">Add room</button>
+    </div>
+  </div>
+  <p class="meta">Group rooms by floor and choose their temperature sensors. Additional equipment is an
+    inventory only: assigning a fan, cover, heater or contact never enables control.</p>
+  <div data-home-map class="home-map" aria-label="Home overview"></div>
+  <div class="card-head">
+    <p class="meta" data-testid="home-discovery-status" aria-live="polite"></p>
+    <button type="button" class="secondary outline" data-home-refresh>Refresh entities</button>
+  </div>
+  <div data-home-rooms class="home-room-editors"></div>
+  <p class="errors" data-home-errors role="alert"></p>
+  <noscript><p class="banner">Enable JavaScript to edit rooms. No settings have been changed.</p></noscript>
+  <dialog class="sheet" data-home-dialog aria-labelledby="home-dialog-title"><article>
+    <h3 id="home-dialog-title">Add room</h3>
+    <label>Name<input data-home-new="name" autocomplete="off" maxlength="64"></label>
+    <div data-home-room-fields>
+      <label>Floor<input data-home-new="floor" list="home-floor-options" maxlength="64" placeholder="e.g. Main floor"></label>
+      <label>Temperature sensor<select data-home-new="temp"></select></label>
+    </div>
+    <p class="meta" data-home-dialog-hint>Changes stay in this form until you save.</p>
+    <p class="errors" data-home-dialog-errors role="alert"></p>
+    <footer><button type="button" data-home-dialog-save>Add room</button>
+      <button type="button" class="secondary" data-home-dialog-cancel>Cancel</button></footer>
+  </article></dialog>
+  <datalist id="home-floor-options"></datalist>
+</section>

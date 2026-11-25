@@ -28,9 +28,15 @@
 <p data-testid="safety-note"><strong>Safety, the thermostat, and off rules need an Owner. Changes there are rejected.</strong></p>
 {% endif %}
 <form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
+      {% if task == 'ha' and p.can('edit_safety') %}data-entity-pickers="1"{% endif %}
       data-settings='{{ settings_json }}' {% if task == 'safety' %}data-review="safety"{% endif %} novalidate>
+  {% if task == 'people' %}{% include "partials/home_editor.html" %}{% endif %}
   <p class="meta">Temperatures in this form use the display unit. Safety, off, and write limits are tighten-only.</p>
   {% include "partials/settings_fields.html" %}
+  {% if task == 'ha' and p.can('edit_safety') %}
+  <p class="meta" data-entity-status aria-live="polite"></p>
+  <button type="button" class="secondary outline" data-entity-refresh>Refresh device and sensor suggestions</button>
+  {% endif %}
   <p class="errors" data-testid="errors"></p>
   <button type="submit" data-testid="settings-save">Save</button>
 </form>
@@ -42,5 +48,6 @@
 {% if task == 'ha' %}
 <script src="{{ up }}{{ asset('weather.js') }}"></script>
 {% endif %}
+{% if task == 'people' %}<script src="{{ up }}{{ asset('home_editor.js') }}"></script>{% endif %}
 <script src="{{ up }}{{ asset('settings.js') }}"></script>
 {% endblock %}

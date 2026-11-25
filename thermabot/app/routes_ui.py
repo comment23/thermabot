@@ -34,7 +34,7 @@ from thermabot.core.explain import GUARD_LABELS, coldest_room, infer_factors
 from thermabot.core.guards import evaluate
 from thermabot.core.overrides import nudge_active, nudges_today
 from thermabot.core.schedule import active_zone, block_at
-from thermabot.core.types import PlanStep
+from thermabot.core.types import PlanStep, RoomReading
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
@@ -369,8 +369,15 @@ def home_view(c: Ctx, p: Principal) -> dict[str, Any]:
     win = timeline.window(steps, now)
     member = p.role == "member"
     rooms = list(c.snapshot.rooms.values()) if c.snapshot else []
+    seen = {room.key for room in rooms}
+    rooms.extend(RoomReading(key=key, temp=None) for key in s.rooms if key not in seen)
     if member and p.room:
         rooms = [r for r in rooms if r.key == p.room]
+    room_groups: dict[str, list[RoomReading]] = {}
+    for room in rooms:
+        config = s.rooms.get(room.key)
+        floor = config.floor if config and config.floor else "Unassigned floor"
+        room_groups.setdefault(floor, []).append(room)
     snap = c.snapshot
     stale_tstat = False
     if snap is not None and snap.thermostat.last_reported is not None:
@@ -382,6 +389,7 @@ def home_view(c: Ctx, p: Principal) -> dict[str, Any]:
         "snap": snap,
         "score": c.score,
         "rooms": rooms,
+        "room_groups": room_groups,
         "next_step": nxt,
         "next_change": None if nxt is None else nxt["step"].reason or nxt["sentence"],
         "timeline_svg": timeline.svg(win, s, s.display.units),
@@ -627,6 +635,10 @@ def _settings_ctx(c: Ctx, p: Principal, task: str) -> dict[str, Any]:
         ],
         "readiness": ready,
         "recent_decisions": recent,
+        "assigned_rooms": [
+            row["room"]
+            for row in c.conn.execute("SELECT DISTINCT room FROM users WHERE room IS NOT NULL")
+        ],
     }
 
 

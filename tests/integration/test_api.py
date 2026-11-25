@@ -300,6 +300,27 @@ def test_settings_validation_and_safety_cap(tmp_path: Path) -> None:
     assert c.get("/api/settings").json()["safety"]["floor_tstat_f"] == 63
 
 
+@pytest.mark.brd("FR-USR-2")
+@pytest.mark.parametrize(
+    ("method", "path"), [("PUT", "/api/settings"), ("POST", "/api/setup/save")]
+)
+def test_settings_cannot_remove_a_users_assigned_room(
+    tmp_path: Path, method: str, path: str
+) -> None:
+    ctx, _, client = make(tmp_path)
+    ctx.conn.execute("UPDATE users SET room = ? WHERE username = ?", ("study", "jordan"))
+    headers = login(client, "alex")
+    settings = client.get("/api/settings").json()
+    room = "study"
+    settings["rooms"].pop(room)
+    for weights in settings["weights"].values():
+        weights.pop(room, None)
+    response = client.request(method, path, json=settings, headers=headers)
+    assert response.status_code == 409
+    assert "Reassign users" in response.json()["detail"]
+    assert room in ctx.settings.rooms
+
+
 @pytest.mark.brd("FR-USR-1")
 def test_users_crud_and_last_owner(tmp_path: Path) -> None:
     _, _, c = make(tmp_path)

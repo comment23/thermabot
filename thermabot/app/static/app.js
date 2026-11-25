@@ -165,6 +165,27 @@
     else delete b.dataset.degraded;
     const label = $('.mode-text', b);
     if (label) label.textContent = text; else b.textContent = text;
+    for (const title of document.querySelectorAll('[data-lifecycle-title]')) {
+      title.textContent = text === 'Setup needed' ? 'Thermabot needs setup'
+        : text === 'Active' ? 'Thermabot is controlling'
+        : text === 'Stopped' ? 'Thermabot is stopped' : 'Thermabot is watching';
+    }
+    for (const description of document.querySelectorAll('[data-lifecycle-description]')) {
+      description.textContent = text === 'Active'
+        ? 'Thermostat changes pass through the safety checks. Restarting returns to Watch.'
+        : text === 'Stopped' || text === 'Setup needed'
+        ? 'Start Watch to collect evidence. Starting never enables thermostat control.'
+        : 'Watch makes recommendations without changing the thermostat.';
+    }
+    const readiness = $('[data-testid=readiness]');
+    if (readiness && prev && prev !== s.state) {
+      readiness.dataset.ready = 'no';
+      for (const id of ['reviewed-shadow', 'reviewed-safety-net']) { const el = $('#' + id); if (el) el.checked = false; }
+      if ($('#active-word')) $('#active-word').value = '';
+      const summary = $('[data-testid=control-readiness-summary]');
+      if (summary) summary.textContent = 'State changed. Refresh checks before approving Control.';
+    }
+    refreshActiveButton();
     const warning = $('#ha-connection-warning');
     if (warning && s.ha_health) warning.hidden = s.ha_health !== 'down';
     const ha = $('[data-testid=ha-chip]');
@@ -233,6 +254,13 @@
     }
     const resume = $('[data-testid=safety-resume]');
     if (resume) resume.disabled = !!retry;
+    for (const action of document.querySelectorAll('[data-watch-action]')) {
+      action.textContent = on ? 'Stop thermabot' : 'Start watching';
+      action.className = on ? 'stop' : 'resume';
+      action.dataset.kill = on ? 'open' : 'resume';
+      action.hidden = !on && action.dataset.canStart !== '1';
+      action.disabled = !on && !!retry;
+    }
   }
   async function openStop() {
     const dlg = $('#stop-sheet');
@@ -309,11 +337,54 @@
     const net = $('#reviewed-safety-net');
     const list = $('[data-testid=readiness]');
     return !!(word && word.value === 'ACTIVE' && shadow && shadow.checked
-      && net && net.checked && list && list.dataset.ready === 'yes');
+      && net && net.checked && list && list.dataset.ready === 'yes'
+      && $('#state-badge')?.dataset.mode !== 'active');
   }
   function refreshActiveButton() {
     const btn = $('[data-testid=kill-on-active]');
     if (btn) btn.disabled = !activeReviewed();
+    const hint = $('#control-approval-hint');
+    if (hint) {
+      const ready = $('[data-testid=readiness]')?.dataset.ready === 'yes';
+      const active = $('#state-badge')?.dataset.mode === 'active';
+      hint.textContent = active ? 'Control is running. Use Stop thermabot to end control.'
+        : !ready ? 'Resolve the readiness blockers, then refresh the checks.'
+        : activeReviewed() ? 'Ready for your approval. Starting Control can change the thermostat.'
+        : 'Complete both acknowledgements and type ACTIVE to enable Start control.';
+    }
+  }
+  async function refreshReadiness(button) {
+    button.disabled = true;
+    const res = await api('GET', 'api/readiness');
+    button.disabled = false;
+    if (!res.ok) { toast(detail(res), 'error'); return; }
+    const list = $('[data-testid=readiness]');
+    list.dataset.ready = res.data.ready ? 'yes' : 'no';
+    for (const check of res.data.checks) {
+      const row = list.querySelector(`[data-check="${CSS.escape(check.id)}"]`);
+      if (!row) continue;
+      row.dataset.ok = check.ok ? 'yes' : 'no';
+      $('.check-result', row).textContent = check.ok ? 'Passed' : 'Needs attention';
+      $('.meta', row).textContent = check.detail;
+    }
+    const blockers = $('[data-testid=control-blockers]');
+    blockers.hidden = res.data.ready;
+    $('ul', blockers).replaceChildren(...res.data.checks.filter((ch) => !ch.ok).map((ch) => {
+      const li = document.createElement('li'); li.textContent = ch.label; return li;
+    }));
+    $('[data-testid=control-readiness-summary]').textContent =
+      `${res.data.checks.filter((ch) => ch.ok).length} of ${res.data.checks.length} checks passed`;
+    const next = $('[data-readiness-next-step]');
+    const blocked = res.data.checks.find((ch) => !ch.ok);
+    next.hidden = !blocked;
+    next.textContent = blocked ? blocked.label + ': ' + blocked.detail : '';
+    const first = $('[data-testid=first-write]');
+    if (first) {
+      first.hidden = !res.data.first_write;
+      first.textContent = res.data.first_write ? 'Current planned target (may change): ' + res.data.first_write : '';
+    }
+    refreshActiveButton();
+    toast('Readiness checks refreshed', 'ok');
   }
   function refreshHome(which) {
     if (!document.getElementById('home-now') || !window.htmx) return;
@@ -363,6 +434,8 @@
     send(f, f.dataset.api, body);
   });
   document.addEventListener('click', (e) => {
+    const refresh = e.target.closest('[data-readiness-refresh]');
+    if (refresh) { e.preventDefault(); refreshReadiness(refresh); return; }
     if (e.target.closest('[data-theme-toggle]')) { e.preventDefault(); toggleTheme(); return; }
     const notice = e.target.closest('button[data-notice]');
     if (notice) { e.preventDefault(); acknowledgeNotice(notice); return; }
@@ -422,6 +495,8 @@
   }
   document.addEventListener('DOMContentLoaded', () => {
     startLive(); countdown(); labelToggle(); tracks();
+    refreshActiveButton();
+    $('[data-testid=settings-nav] [aria-current=page]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
     sheetGesture($('#stop-sheet'));
     sheetGesture($('#confirm-sheet'));
     const stop = $('#kill-open');

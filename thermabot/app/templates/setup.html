@@ -8,7 +8,7 @@ environment. Saving never changes the run mode or starts Active control.</small>
 <p class="meta" data-testid="setup-rail-summary">Setup never starts Active control.</p>
 <div id="setup" data-testid="setup" data-settings='{{ settings_json }}' data-running="{{ running_entity or '' }}">
   <ol class="steps" data-testid="setup-steps">
-    <li data-step="1">Connect</li><li data-step="2">Thermostat</li><li data-step="3">Sensors</li>
+    <li data-step="1">Connect</li><li data-step="2">Thermostat</li><li data-step="3">Home &amp; sensors</li>
     <li data-step="4">People</li><li data-step="5">Comfort</li><li data-step="6">Weather</li><li data-step="7">Review</li>
   </ol>
 
@@ -28,15 +28,11 @@ environment. Saving never changes the run mode or starts Active control.</small>
   </section>
 
   <section data-step="3" data-testid="step-sensors" hidden>
-    <h3>3. Sensors</h3>
+    <h3>3. Your home and sensors</h3>
     <p><small>Suggested matches are pre-selected with their confidence. Type to search all
       entities and override any of them, or leave a field empty.</small></p>
     <div data-testid="sensor-fields"></div>
-    <h4>Rooms</h4>
-    <p><small>Room temperature sensors the comfort score uses. The thermostat itself is always a
-      room.</small></p>
-    <div data-testid="room-list"></div>
-    <button type="button" class="secondary outline" data-setup="add-room" data-testid="add-room">Add a room</button>
+    {% include "partials/home_editor.html" %}
     <div class="card" data-testid="home-context">
       <h4>Home context and additional equipment</h4>
       <p><small>Read-only assessment from Home Assistant. Confirm each room/floor and device;
@@ -127,5 +123,6 @@ environment. Saving never changes the run mode or starts Active control.</small>
   </div>
 </div>
 <script src="{{ asset('weather.js') }}"></script>
+<script src="{{ asset('home_editor.js') }}"></script>
 <script src="{{ asset('setup.js') }}"></script>
 {% endblock %}

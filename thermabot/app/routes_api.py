@@ -1194,6 +1194,15 @@ def _commit_settings(
     action: str,
     **detail: object,
 ) -> None:
+    removed = set(old.rooms) - set(new.rooms)
+    assigned = {
+        row["room"]
+        for row in c.conn.execute("SELECT DISTINCT room FROM users WHERE room IS NOT NULL")
+    }
+    if removed & assigned:
+        raise HTTPException(
+            409, "Reassign users before removing rooms: " + ", ".join(sorted(removed & assigned))
+        )
     with c.conn:
         c.conn.execute("BEGIN")
         _kv_put(c, "settings", new.model_dump(mode="json"), p.username)

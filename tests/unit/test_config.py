@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.house import HOUSE
-from thermabot.config import Env, OffCfg, SafetyCfg, Settings, WritesCfg
+from thermabot.config import Env, OffCfg, RoomCfg, SafetyCfg, Settings, WritesCfg
 from thermabot.core import guards
 
 
@@ -109,6 +109,14 @@ def test_settings_rejects_bad_values() -> None:
 def test_settings_json_round_trip() -> None:
     s = Settings()
     assert Settings.model_validate_json(s.model_dump_json()) == s
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_room_inventory_round_trip_and_invalid_entity_rejection() -> None:
+    room = RoomCfg(temp="sensor.study_temperature", floor="Main floor", devices=["fan.study"])
+    assert RoomCfg.model_validate_json(room.model_dump_json()).devices == ["fan.study"]
+    with pytest.raises(ValidationError, match="Home Assistant entity IDs"):
+        RoomCfg(temp="sensor.study_temperature", devices=["not an entity"])
 
 
 @pytest.mark.brd("D§14.1")
