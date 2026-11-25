@@ -1,5 +1,16 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.10 - 2026-11-25 (prerelease)
+
+- Add explicit Start watching and Stop thermabot controls, clickable Owner acknowledgements,
+  clearer Control readiness blockers, and an in-page readiness refresh.
+- Add a shared floor/room editor with named sensor selection, room add/remove workflows,
+  and passive equipment assignments. Group dashboard rooms by floor and improve mobile
+  Settings navigation.
+- The in-app version remains `0.6.8`. All Control gates remain enforced; equipment
+  assignments do not authorize device control. Stable v0.6.8 remains blocked on the
+  documented live SHADOW soak and Owner review.
+
 ## 0.6.8-rc.9 - 2026-11-24 (prerelease)
 
 - Include Watch-first lifecycle controls, the Owner-approved guarded Stop handoff, and

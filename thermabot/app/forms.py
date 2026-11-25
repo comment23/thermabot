@@ -66,14 +66,14 @@ TASKS: dict[str, tuple[str, ...]] = {
     ),
     "safety": ("stop_handoff", "safety", "off", "writes"),
     "ha": ("thermostat", "sensors", "weather"),
-    "people": ("rooms", "weights", "presence", "aux_heat"),
+    "people": ("presence", "aux_heat"),
     "advanced": ("planner", "metrics", "alerts", "summary"),
 }
 TASK_TITLES = {
     "comfort": "Comfort",
     "safety": "Safety & control",
     "ha": "Home Assistant",
-    "people": "People & rooms",
+    "people": "Home & rooms",
     "advanced": "Advanced",
     "schedule": "Schedule",
 }

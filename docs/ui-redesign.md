@@ -14,9 +14,14 @@ Every signed-in page shows one status bar:
   the handoff. **Start watching** always starts in Shadow.
 - On a phone the bar keeps the mode pill and Stop. Soak and health chips hide.
 
-Control is not a one-tap action. The button on Safety & control stays disabled until the
-readiness checklist and Owner review are complete. The server independently enforces the
-same checks and typed confirmation.
+Home and Safety & control show a dedicated Thermabot controls card. Start watching always
+starts SHADOW; Stop explains whether a guarded comfort handoff will be attempted.
+
+Control is not a one-tap action. Automatic readiness checks are separate from the Owner's
+clickable acknowledgements. The acknowledgements and typed confirmation remain usable while
+readiness is blocked, but Start control stays disabled until both parts are complete.
+The page shows the next blocker and an expandable list, and Refresh checks updates readiness
+without discarding the review. The server independently enforces all checks and `ACTIVE`.
 
 ## Navigation
 
@@ -30,13 +35,16 @@ Settings tasks:
 | Schedule | Week rows for weekday and weekend blocks, band sliders, runtime preview |
 | Safety & control | Stopped / Shadow / Active, readiness, tighten-only limits |
 | Home Assistant | Thermostat, sensors, weather, link to the setup wizard |
-| People & rooms | Rooms, weights, presence |
+| Home & rooms | Floor overview, room/sensor/equipment editor, comfort importance, presence |
 | Advanced | Planner, metrics, alerts, summary, and the read-only JSON view |
 | Backup, Health, Account | Existing recovery, health, and password pages |
 
 ## Home
 
-Home is five cards: Right now (hero temperature in display units, HVAC action, comfort-band gauge), Next recommendation (one sentence, three reasons, a Shadow · not sent tag, Why this? and See the plan), Next 24 hours (one SVG time axis plus a table), room tiles, and Quick actions (Pause, Guest, Override). The old controls panel is gone. Members land on their room and the read-only bands.
+Home starts with explicit lifecycle controls, followed by Right now, Next recommendation,
+Next 24 hours, floor-grouped room tiles, and Quick actions. Configured rooms with no reading
+remain visible as waiting; stale readings remain hidden. Members see their own room and
+read-only bands, not lifecycle controls.
 
 `GET /partials/{now,next,timeline,rooms,quick}` returns those cards. `app.js` refreshes Right now and Rooms on `tb:snapshot`, and the recommendation and timeline on `tb:plan`, with `htmx.ajax`.
 
@@ -60,6 +68,51 @@ word `ACTIVE`. The [setup guide](setup.md#watch-control-and-stop) documents the 
 thresholds and restart behavior. Failed handoffs and Active-to-Watch restarts produce
 persistent notices. Limits on this page remain tighten-only; saving shows a diff and asks
 for `SAVE`.
+
+## Floors, rooms and equipment
+
+Setup and Home & rooms use the same editor rather than a flat generated field list.
+Floor cards show their rooms; selecting a room moves focus to its editor. Add floor creates
+a draft group, persisted through a room's `floor` label when settings are saved. An empty
+draft floor is not a separate stored object or a Home Assistant registry change.
+
+Add room requires a unique name and a temperature sensor. Sensor selectors show discovered
+friendly names and retain saved-but-undiscovered mappings. Room keys remain stable for
+accounts and door mappings. Comfort importance, tolerance, staleness and auxiliary-heat
+observation are grouped under each room rather than scattered across separate maps.
+Inclusion checkboxes are reserved for discovered suggestions; configured rooms use the
+explicit Remove room action. Empty importance blocks remain empty rather than silently
+assigning influence to the thermostat.
+Removing a room also removes its weights; users or door-contact mappings must be reassigned
+first. The server rejects deleting an account's assigned room in both setup and settings.
+
+`rooms.<key>.devices` stores additional Home Assistant entity IDs for the local inventory.
+Fans, covers, supplemental heaters and contacts can be associated with rooms, but this
+metadata is not an allowlist, a new read/write path, or permission to actuate equipment.
+Door assessment still requires its separate explicit role/relationship configuration.
+
+Home Assistant settings offer named thermostat/sensor suggestions without automatically
+selecting or saving them. Discovery remains Owner-only; existing settings retain their
+role checks. All edits are drafts until the existing configuration save succeeds.
+
+## Audit findings addressed
+
+- Review boxes were disabled whenever any automatic readiness check failed, making them look
+  broken. Reviews are now interactive while the Control gate remains intact.
+- Three equal-width mode cards hid a long readiness checklist in a narrow column. Lifecycle
+  actions, next blocker, full checks and Owner approval now have separate, readable sections.
+- Settings could only edit existing room-map leaves, not add or remove rooms. The shared
+  editor adds complete room workflows and cleans dependent weights.
+- The setup Add room handler had an outdated argument list, producing an unchecked row and
+  a boolean floor value. The duplicate row implementation has been replaced.
+- Floor labels were repeated on a flat tile list rather than visualized as groups.
+- Raw entity fields and unassignable equipment lists lacked a useful connection to rooms.
+  Named suggestions and explicit read-only inventory assignments now make that relationship visible.
+
+The design follows Home Assistant's [floor/area grouping](https://www.home-assistant.io/docs/organizing/)
+and [GOV.UK checkbox guidance](https://design-system.service.gov.uk/components/checkboxes/):
+clear hierarchy, named actions, grouped acknowledgements, and a large clickable label.
+It keeps Jinja, native controls and local assets; no new frontend framework is required.
 
 ## Sheets
 

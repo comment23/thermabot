@@ -1,0 +1,19 @@
+{% if p.can('kill_off') %}
+<section class="card lifecycle" data-testid="lifecycle-controls" aria-label="Thermabot controls">
+  <div>
+    <p class="eyebrow">THERMABOT CONTROLS</p>
+    <h3 data-lifecycle-title>{{ 'Thermabot needs setup' if eff.label == 'SETUP NEEDED' else ('Thermabot is controlling' if mode.key == 'active' else ('Thermabot is watching' if kill == 'on' else 'Thermabot is stopped')) }}</h3>
+    <p data-lifecycle-description>{{ 'Thermostat changes pass through the safety checks. Restarting returns to Watch.' if mode.key == 'active' else ('Watch makes recommendations without changing the thermostat.' if kill == 'on' else 'Start Watch to collect evidence. Starting never enables thermostat control.') }}</p>
+    {% if mode.degraded %}<p class="meta">Needs attention: {{ mode.degraded }}</p>{% endif %}
+  </div>
+  <div class="lifecycle-actions">
+    <button type="button" data-watch-action data-kill="{{ 'open' if kill == 'on' else 'resume' }}"
+      data-can-start="{{ 1 if p.can('kill_on') else 0 }}" class="{{ 'stop' if kill == 'on' else 'resume' }}"
+      {% if kill != 'on' and not p.can('kill_on') %}hidden{% endif %}
+      {% if stop_retry_required and kill != 'on' %}disabled{% endif %}>{{ 'Stop thermabot' if kill == 'on' else 'Start watching' }}</button>
+    {% if p.can('set_active') and task != 'safety' %}
+    <a href="{{ up }}settings/safety" role="button" class="secondary outline">Review control readiness</a>
+    {% endif %}
+  </div>
+</section>
+{% endif %}

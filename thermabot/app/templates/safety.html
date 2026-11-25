@@ -4,42 +4,60 @@
 <div class="page-head"><h2>Safety and control</h2>
   <p class="meta">Start in Watch. Control needs a separate Owner review and approval.</p></div>
 {% include "partials/settings_nav.html" %}
-<div class="mode-cards">
-  <article class="card mode-card{% if mode.key == 'stopped' %} current{% endif %}" data-testid="mode-stopped">
-    <h3>Stopped</h3>
-    <p>The bot does not change the thermostat.</p>
-    {% if kill != 'on' and p.can('kill_on') and not stop_retry_required %}
-    <button type="button" class="resume" data-kill="resume" data-testid="safety-resume">Start watching</button>
-    {% endif %}
-  </article>
-  <article class="card mode-card{% if mode.key == 'shadow' %} current{% endif %}" data-testid="mode-shadow">
-    <h3>Watch (Shadow)</h3>
-    <p>The bot plans and logs what it would send. Nothing is written to the thermostat.</p>
-    <p class="meta">Seven days of tracked evidence are required before control.</p>
-  </article>
-  <article class="card mode-card{% if mode.key == 'active' %} current{% endif %}" data-testid="mode-active">
-    <h3>Control (Active)</h3>
-    <p>The bot can change the thermostat after its safety checks pass. A restart returns control to Watch.</p>
+{% include "partials/lifecycle.html" %}
+<div class="control-review-grid">
+  <section class="card">
+    <div class="card-head"><h3>1. Readiness checks</h3>
+      <button type="button" class="secondary outline" data-readiness-refresh>Refresh checks</button></div>
+    <p class="meta">These are automatic checks, not boxes to tick. All must pass before Control can start.</p>
     {% if readiness %}
+    <p data-testid="control-readiness-summary">{{ readiness.checks|selectattr('ok')|list|length }} of {{ readiness.checks|length }} checks passed</p>
+    {% set blocked = readiness.checks|rejectattr('ok')|list %}
+    <p class="banner" data-readiness-next-step{% if not blocked %} hidden{% endif %}>
+      {% if blocked %}<strong>{{ blocked[0].label }}</strong> {{ blocked[0].detail }}{% endif %}
+    </p>
+    <details class="readiness-details"><summary>View all automatic checks</summary>
     <ul class="checklist" data-testid="readiness" data-ready="{{ 'yes' if readiness.ready else 'no' }}">
       {% for ch in readiness.checks %}
       <li class="check-row" data-ok="{{ 'yes' if ch.ok else 'no' }}" data-check="{{ ch.id }}">
-        <i class="dot" aria-hidden="true"></i> {{ ch.label }} <span class="meta">{{ ch.detail }}</span>
+        <span class="check-result">{{ 'Passed' if ch.ok else 'Needs attention' }}</span>
+        <div><strong>{{ ch.label }}</strong><p class="meta">{{ ch.detail }}</p></div>
       </li>
       {% endfor %}
     </ul>
-    {% if readiness.first_write %}<p data-testid="first-write">Current planned target (may change): {{ readiness.first_write }}</p>{% endif %}
+    </details>
+    {% endif %}
+    <p class="meta">Watch evidence is tracked, not just elapsed time. Configure sensors in
+      <a href="{{ up }}settings/ha">Home Assistant</a>, review
+      <a href="{{ up }}shadow">Watch history</a>, and configure the stop band below.</p>
+  </section>
+  <section class="card owner-review">
+    <h3>2. Owner review and approval</h3>
+    <p>You can complete your acknowledgements here. They do not override the readiness checks.</p>
+    {% if readiness %}
+    <div class="banner" data-testid="control-blockers"{% if readiness.ready %} hidden{% endif %}>
+      <strong>Control is not ready yet.</strong>
+      <details><summary>See blocking items</summary>
+      <ul>{% for ch in readiness.checks if not ch.ok %}<li>{{ ch.label }}</li>{% endfor %}</ul>
+      </details>
+      <p>Keep Watch running, resolve the items above, then refresh the checks.</p>
+    </div>
+    <p data-testid="first-write"{% if not readiness.first_write %} hidden{% endif %}>Current planned target (may change): {{ readiness.first_write or '' }}</p>
     {% if p.can('set_active') and mode.key != 'active' %}
-    <label><input type="checkbox" id="reviewed-shadow" data-testid="reviewed-shadow" {% if not readiness.ready %}disabled{% endif %}>
-      I reviewed the seven-day Watch report, including degraded intervals and stale rooms.</label>
-    <label><input type="checkbox" id="reviewed-safety-net" data-testid="reviewed-safety-net" {% if not readiness.ready %}disabled{% endif %}>
-      I independently verified the Home Assistant safety net and understand its limits.</label>
+    <fieldset class="review-acknowledgements">
+    <legend>Your acknowledgements</legend>
+    <label class="review-check" for="reviewed-shadow"><input type="checkbox" id="reviewed-shadow" data-testid="reviewed-shadow">
+      <span>I reviewed the seven-day Watch report, including degraded intervals and stale rooms.</span></label>
+    <label class="review-check" for="reviewed-safety-net"><input type="checkbox" id="reviewed-safety-net" data-testid="reviewed-safety-net">
+      <span>I independently verified the Home Assistant safety net and understand its limits.</span></label>
+    </fieldset>
     <label>Type ACTIVE to confirm
-      <input id="active-word" data-testid="active-word" autocomplete="off" {% if not readiness.ready %}disabled{% endif %}></label>
-    <button type="button" class="contrast" data-kill="on-active" data-testid="kill-on-active" disabled>Start control</button>
+      <input id="active-word" data-testid="active-word" autocomplete="off" spellcheck="false"></label>
+    <p id="control-approval-hint" class="meta" aria-live="polite">All readiness checks, both acknowledgements, and ACTIVE are required.</p>
+    <button type="button" data-kill="on-active" data-testid="kill-on-active" aria-describedby="control-approval-hint" disabled>Start control</button>
     {% endif %}
     {% endif %}
-  </article>
+  </section>
 </div>
 <h3>Last 24 hours</h3>
 <section class="card">
@@ -51,6 +69,7 @@
 </section>
 <form id="settings-form" data-settings-form data-testid="settings-form" data-units="{{ units }}"
       data-review="safety" data-settings='{{ settings_json }}' novalidate>
+  <h3>3. Stop comfort band and safety limits</h3>
   <p>Configure the Owner-approved stop comfort band below. It is separate from the schedule and
     starts disabled. Stopping control attempts this band, but safety checks can block it; the bot
     still stops and warns you to check the thermostat.</p>

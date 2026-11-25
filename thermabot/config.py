@@ -126,6 +126,7 @@ class ScheduleCfg(BaseModel):
 class RoomCfg(BaseModel):
     temp: str
     floor: str = Field(default="", max_length=64, pattern=r"^[a-zA-Z0-9 _-]*$")
+    devices: list[str] = Field(default_factory=list)
     tol: float = Field(default=0, ge=0)
     stale_min: float = 60
     dead_min: float = 360
@@ -135,6 +136,8 @@ class RoomCfg(BaseModel):
     def _dead_after_stale(self) -> RoomCfg:
         if self.dead_min < self.stale_min:
             raise ValueError("dead_min must be >= stale_min")
+        if any(not entity or not re.fullmatch(_ENTITY, entity) for entity in self.devices):
+            raise ValueError("devices must contain Home Assistant entity IDs")
         return self
 
 

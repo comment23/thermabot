@@ -508,6 +508,67 @@ dialog.sheet::backdrop { background: rgba(16, 24, 32, .45); }
 .mode-cards { display: grid; gap: 12px; }
 @media (min-width: 900px) { .mode-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .mode-card.current { outline: 2px solid var(--tb-accent); }
+.lifecycle { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 20px; border-top: 3px solid var(--tb-accent); }
+.lifecycle h3 { font-size: 24px; margin-bottom: 8px; letter-spacing: -.02em; }
+.lifecycle p:last-child { margin-bottom: 0; }
+.lifecycle-actions, .editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lifecycle-actions > *, .editor-actions > * { margin: 0; min-height: 44px; }
+.control-review-grid { display: grid; gap: 16px; align-items: start; }
+.checklist { padding: 0; list-style: none; }
+.checklist .check-row { align-items: start; padding: 12px 0; border-bottom: 1px solid var(--tb-line); }
+.check-row .meta { margin: 4px 0 0; white-space: normal; }
+.check-result { flex: 0 0 112px; font-size: 12px; font-weight: 700; color: var(--tb-warn-fg); }
+.check-row[data-ok="yes"] .check-result { color: var(--tb-good); }
+.review-check { display: flex; gap: 12px; align-items: flex-start; min-height: 44px;
+  padding: 12px; border: 1px solid var(--tb-line); border-radius: 12px; cursor: pointer; }
+.review-check input[type="checkbox"] { flex: none; width: 24px; height: 24px; margin: 0; }
+.review-check:has(input:checked) { border-color: var(--tb-accent); background: var(--tb-bg); }
+.review-acknowledgements legend { font-size: 14px; font-weight: 700; }
+.owner-review .banner ul { padding-left: 20px; margin-bottom: 8px; }
+.readiness-details summary, .owner-review .banner summary { min-height: 44px; display: flex; align-items: center; }
+.dashboard-floor { margin-bottom: 20px; }
+.dashboard-floor h4 { margin-bottom: 12px; font-size: 16px; }
+.home-map { display: grid; gap: 16px; margin: 20px 0; }
+.home-floor { padding: 16px; border: 1px solid var(--tb-line); border-radius: 16px; background: var(--tb-bg); }
+.home-floor h4, .room-editor h4 { margin: 0; font-size: 17px; }
+.home-floor-rooms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; }
+main button.map-room { display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 6px; min-height: 112px; text-align: left; background: var(--tb-card); border: 1px solid var(--tb-line);
+  color: var(--tb-text); border-radius: 12px; margin: 0; padding: 14px; white-space: normal; }
+.map-room small { color: var(--tb-text-muted); overflow-wrap: anywhere; }
+.home-room-editors { display: grid; gap: 16px; }
+.room-editor { padding: 16px; margin: 0; border: 1px solid var(--tb-line); border-radius: 16px; box-shadow: none; }
+.room-editor details { margin: 8px 0; }
+.room-editor summary { min-height: 44px; display: flex; align-items: center; font-size: 14px; }
+.room-editor input, .room-editor select { min-height: 44px; }
+.room-editor .grid-2, .room-editor .grid-3 { align-items: start; }
+.equipment-picker { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.equipment-picker label { flex: 1 1 200px; margin-bottom: 0; }
+.equipment-picker button { margin-bottom: 0; min-height: 44px; }
+.equipment-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.equipment-chip { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px;
+  border: 1px solid var(--tb-line); border-radius: 12px; overflow-wrap: anywhere; }
+.equipment-chip button { width: auto; margin: 0; min-height: 44px; padding: 4px 10px; font-size: 12px; }
+.home-editor select { width: 100%; }
+.home-editor [data-home-room-fields][hidden] { display: none; }
+.entity-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+main .entity-suggestions button { width: auto; min-height: 44px; margin: 0; padding: 6px 10px; font-size: 12px; }
+@media (min-width: 1000px) {
+  .control-review-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .home-map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-room-editors { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .lifecycle-actions, .lifecycle-actions > * { width: 100%; }
+  .editor-actions { width: 100%; }
+  .editor-actions button { flex: 1; width: auto; margin: 0; }
+  .check-result { flex-basis: 86px; }
+  .home-editor .card-head { align-items: flex-start; }
+  .settings-nav { max-width: 100%; overflow-x: auto; }
+  .settings-nav ul { flex-wrap: nowrap; width: max-content; }
+  .settings-nav li { flex-shrink: 0; }
+}
 .week-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .week-blocks { display: flex; flex-wrap: wrap; gap: 8px; }
 button.block { min-height: var(--tb-tap); min-width: 44px; width: auto; border-radius: 8px; color: #1d302d; }

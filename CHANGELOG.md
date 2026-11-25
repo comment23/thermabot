@@ -5,6 +5,22 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.10 - 2026-11-25 (prerelease)
+
+The Home Assistant add-on catalog version is `0.6.8-rc.10`. The in-app version remains
+`0.6.8`. This prerelease does not enable thermostat or equipment control; stable v0.6.8
+remains blocked on the seven-day SHADOW soak and Owner review.
+
+- Separate clickable Owner acknowledgements from automatic Control readiness checks.
+  Start control still requires all server-side gates and typed confirmation. Add clear
+  lifecycle controls, next-blocker guidance and an in-page readiness refresh.
+- Add a shared floor/room editor in setup and Settings, with named sensor selection,
+  add/remove workflows, per-room comfort importance and a visual home overview.
+- Store additional equipment as read-only room inventory, not actuator authorization.
+  Preserve saved mappings during discovery failures and protect rooms assigned to accounts.
+- Group dashboard rooms by floor and keep newly configured rooms visible while waiting
+  for readings. Improve mobile Settings navigation and preserve unused comfort weights.
+
 ## 0.6.8-rc.9 - 2026-11-24 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.9`. The in-app version remains

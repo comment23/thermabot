@@ -43,6 +43,79 @@ def test_save_valid_settings_replans(page: Page, srv: Srv) -> None:
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-CFG-1")
+def test_home_editor_removes_room_weights_and_protects_assigned_rooms(page: Page, srv: Srv) -> None:
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    page.locator('[data-home-room="study"] [data-room-remove]').click()
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Reassign users")
+    expect(page.locator('[data-home-room="study"]')).to_be_visible()
+    page.locator('[data-home-room="den"] [data-room-remove]').click()
+    page.click("[data-testid=confirm-yes]")
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    assert "den" not in srv.ctx.settings.rooms
+    assert all("den" not in weights for weights in srv.ctx.settings.weights.values())
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_home_editor_adds_floor_and_persists_room_assignment(page: Page, srv: Srv) -> None:
+    before = srv.ctx.settings.model_dump(mode="json")
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    page.click("[data-home-add=floor]")
+    page.fill("[data-home-new=name]", "Main floor")
+    page.click("[data-home-dialog-save]")
+    expect(page.locator('[data-home-floor="Main floor"]')).to_contain_text("0 rooms")
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    page.locator('[data-home-room="study"] [data-r=floor]').fill("Main floor")
+    expect(page.locator('[data-home-floor="Main floor"]')).to_contain_text("Study")
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    assert srv.ctx.settings.rooms["study"].floor == "Main floor"
+    assert srv.ctx.settings.weights == before["weights"]
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_home_editor_preserves_unused_weight_blocks(page: Page, srv: Srv) -> None:
+    srv.ctx.settings = srv.ctx.settings.model_copy(
+        update={"weights": {**srv.ctx.settings.weights, "away": {}}}
+    )
+    before = srv.ctx.settings.weights
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    page.locator('[data-home-room="study"] [data-r=floor]').fill("Main floor")
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    assert srv.ctx.settings.weights == before
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_home_discovery_failure_preserves_saved_mappings(page: Page, srv: Srv) -> None:
+    before = srv.ctx.settings.model_dump(mode="json")
+    page.route(
+        "**/api/setup/discover**",
+        lambda route: route.fulfill(status=503, json={"detail": "Home Assistant unavailable"}),
+    )
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    expect(page.locator("[data-testid=home-discovery-status]")).to_contain_text("Discovery failed")
+    expect(page.locator('[data-home-room="study"] [data-r=temp]')).to_have_value(
+        "sensor.study_temperature"
+    )
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    assert srv.ctx.settings.model_dump(mode="json") == before
+    srv.errors.clear()  # expected mocked 503 response
+    assert_page_healthy(page, srv)
+
+
 @pytest.mark.brd("FR-CMF-1")
 def test_unchanged_save_is_disabled_and_writes_nothing(page: Page, srv: Srv) -> None:
     """v0.6.1: with nothing changed, Save is disabled and says 'No changes'; no row is written."""
@@ -186,3 +259,49 @@ def test_member_forbidden(page: Page, srv: Srv) -> None:
     r = page.goto(f"{srv.url}/settings")
     assert r is not None and r.status == 403
     assert "/settings" not in page.goto(f"{srv.url}/").text()  # type: ignore[union-attr]
+
+
+@pytest.mark.brd("FR-CFG-1")
+@pytest.mark.parametrize("width", [390, 1440])
+def test_home_editor_adds_floor_room_and_read_only_equipment(
+    page: Page, srv: Srv, width: int
+) -> None:
+    srv.ctx.mock_ha.states["fan.study"] = {  # type: ignore[attr-defined]
+        "entity_id": "fan.study",
+        "state": "off",
+        "attributes": {"friendly_name": "Study fan"},
+    }
+    before = srv.ctx.settings.model_dump(mode="json")
+    page.set_viewport_size({"width": width, "height": 900})
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    expect(page.locator("[data-testid=home-discovery-status]")).to_contain_text("loaded")
+    page.click("[data-home-add=room]")
+    page.fill("[data-home-new=name]", "Guest room")
+    page.fill("[data-home-new=floor]", "Upper floor")
+    page.select_option("[data-home-new=temp]", "sensor.den_temperature")
+    page.click("[data-home-dialog-save]")
+    room = page.locator('[data-home-room="guest_room"]')
+    room.locator("[data-room-devices] summary").click()
+    room.locator("[data-room-device-picker]").select_option("fan.study")
+    room.locator("[data-room-device-add]").click()
+    expect(page.locator('[data-home-floor="Upper floor"]')).to_contain_text("Guest Room")
+    assert srv.ctx.settings.model_dump(mode="json") == before
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    page.wait_for_event("load")
+    added = srv.ctx.settings.rooms["guest_room"]
+    assert (added.floor, added.temp, added.devices) == (
+        "Upper floor",
+        "sensor.den_temperature",
+        ["fan.study"],
+    )
+    assert srv.ctx.settings.weights["home"]["guest_room"] == 1
+    assert (
+        srv.ctx.settings.rooms["bedroom_1"].model_dump(mode="json") == before["rooms"]["bedroom_1"]
+    )
+    assert srv.ctx.settings.thermostat.model_dump(mode="json") == before["thermostat"]
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    expect(page.locator('[data-home-room="guest_room"]')).to_contain_text("Study fan")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    assert_page_healthy(page, srv)

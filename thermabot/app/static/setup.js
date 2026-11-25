@@ -22,6 +22,7 @@
   let step = 1;
   let haOk = false;
   let disc = null;
+  let home = null;
 
   // ---- units (mirror of thermabot/app/units.py) ----
   const fToC = (f) => Math.round((f - 32) * 5 / 9 * 10) / 10;
@@ -101,7 +102,7 @@
     const h = await tb.api('GET', 'api/setup/home-context');
     renderClimate();
     renderSensors();
-    renderRooms();
+    if (!home) home = window.tbHomeEditor($('[data-home-editor]'), st, disc);
     renderPeople();
     renderHomeContext(h.ok ? h.data : null, h.ok ? '' : tb.detail(h));
   }
@@ -134,6 +135,7 @@
     if (e.target.name === 'tstat') {
       st.thermostat.entity_id = e.target.value;
       if (st.rooms.thermostat) st.rooms.thermostat.temp = e.target.value;
+      if (home) home.setThermostat(e.target.value);
     }
     if (e.target.dataset.testid === 'units') {
       readBands(true);
@@ -171,22 +173,6 @@
     const b = e.target.closest('[data-pick]');
     if (b) { e.preventDefault(); $(`[data-testid=sensor-${b.dataset.for}]`).value = b.dataset.pick; }
   });
-
-  function roomRow(key, entity, floor, on, c) {
-    return `<div class="room-row" data-testid="room-row">
-      <input type="checkbox" aria-label="use room" ${on ? 'checked' : ''} data-r="on">
-      <input data-r="key" aria-label="room name" value="${esc(key)}" placeholder="room">
-      <input type="search" list="dl-all" data-r="temp" aria-label="temperature sensor" value="${esc(entity)}" placeholder="sensor.…">
-      <input data-r="floor" aria-label="floor (owner confirmed)" value="${esc(floor)}" maxlength="64" placeholder="floor (confirm)">
-      <small>${c ? esc(conf(c) + ' ' + c.reason) : ''}</small></div>`;
-  }
-  function renderRooms() {
-    const used = new Set(Object.values(st.rooms).map((r) => r.temp));
-    const rows = Object.entries(st.rooms).filter(([k]) => k !== 'thermostat')
-      .map(([k, r]) => roomRow(k, r.temp, r.floor || '', true, null));
-    for (const c of disc.suggestions.rooms) if (!used.has(c.entity_id)) rows.push(roomRow(c.room, c.entity_id, '', false, c));
-    $('[data-testid=room-list]').innerHTML = rows.join('') || '<p><small>No temperature sensors found.</small></p>';
-  }
 
   function candidateList(selector, items) {
     const box = $(selector);
@@ -262,29 +248,9 @@
       if (v && !ids.has(v)) bad.push(`${k}: ${v} is not a Home Assistant entity`);
       st.sensors[k] = v;
     }
-    const rooms = { thermostat: st.rooms.thermostat || { temp: st.thermostat.entity_id, stale_min: 10, dead_min: 10 } };
-    rooms.thermostat.temp = st.thermostat.entity_id;
-    for (const row of $$('[data-testid=room-row]')) {
-      if (!$('[data-r=on]', row).checked) continue;
-      const key = slug($('[data-r=key]', row).value);
-      const temp = $('[data-r=temp]', row).value.trim();
-      const floor = $('[data-r=floor]', row).value.trim();
-      if (!key || !temp) { bad.push('every ticked room needs a name and a sensor'); continue; }
-      if (rooms[key]) { bad.push(`room ${key} listed twice`); continue; }
-      if (!ids.has(temp)) bad.push(`room ${key}: ${temp} is not a Home Assistant entity`);
-      rooms[key] = { ...(orig.rooms[key] || {}), temp, floor };
-    }
-    st.rooms = rooms;
-    // weights: drop rooms that are gone; a new room joins the Home block at weight 1
-    for (const blk of ['home', 'sleep', 'away']) {
-      const w = st.weights[blk] || {};
-      for (const k of Object.keys(w)) if (!rooms[k]) delete w[k];
-      if (!Object.keys(w).length) w.thermostat = 1;
-      st.weights[blk] = w;
-    }
-    for (const k of Object.keys(rooms)) {
-      if (!orig.rooms[k] && !Object.values(st.weights).some((w) => k in w)) st.weights.home[k] = 1;
-    }
+    home.apply(st);
+    const roomError = home.validate(st);
+    if (roomError) bad.push(roomError);
     return [bad.join('\n'), readOpenings()].filter(Boolean).join('\n');
   }
 
@@ -514,7 +480,6 @@
     if (a === 'ha-test') haTest();
     else if (a === 'back') go(step - 1);
     else if (a === 'next') { const m = validateStep(); if (m) errors(m); else go(step + 1); }
-    else if (a === 'add-room') $('[data-testid=room-list]').insertAdjacentHTML('beforeend', roomRow('', '', true, null));
     else if (a === 'defaults') {
       st.bands = JSON.parse(JSON.stringify(DEFAULT_BANDS));
       for (const i of $$('[data-band]')) {
