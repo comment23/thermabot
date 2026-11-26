@@ -127,6 +127,10 @@ def run_wizard(page: Page, srv: Srv, shots: str | None = None) -> None:
     )
     alex.locator("[data-p=on]").check()
     alex.locator("[data-p=name]").fill("Alex")
+    page.get_by_role("button", name="Add person", exact=True).click()
+    added = page.locator("[data-testid=person-row]").last
+    added.locator("[data-p=name]").fill("Sam")
+    added.locator("[data-p=companion]").fill("person.alex")
     _next(page)
     # 5: comfort bands with validation, °C display
     page.select_option("[data-testid=units]", "C")
@@ -179,6 +183,7 @@ def _assert_saved(srv: Srv) -> None:
     assert s.sensors.blower == "binary_sensor.living_room_blower_active"
     assert s.sensors.humidity == ""
     assert s.presence.people["alex"].companion == "person.alex"
+    assert s.presence.people["sam"].companion == "person.alex"
     assert s.display.units == "C"
     assert s.bands.heat.home == (68, 70.5)  # stored °F
     assert s.bands.cool.home == (73, 76)  # untouched: exact

@@ -9,6 +9,8 @@
   const units = form.dataset.units;
   const homeRoot = form.querySelector('[data-home-editor]');
   const home = homeRoot ? window.tbHomeEditor(homeRoot, JSON.parse(form.dataset.settings)) : null;
+  const peopleRoot = form.querySelector('[data-people-editor]');
+  const people = peopleRoot ? window.tbPeopleEditor(peopleRoot, JSON.parse(form.dataset.settings)) : null;
   // °C -> °F (mirror of app/units.py): absolute temps round to 0.5 °F, deltas to 0.1 °F
   const cToF = (c) => Math.round((c * 9 / 5 + 32) * 2) / 2;
   const dToF = (c) => Math.round(c * 9 / 5 * 10) / 10;
@@ -45,6 +47,7 @@
   function collect() {
     const body = JSON.parse(form.dataset.settings);
     if (home) home.apply(body);
+    if (people) people.apply(body);
     for (const el of form.querySelectorAll('[data-path]')) {
       if (el.closest('fieldset[disabled]')) continue;
       const v = value(el);
@@ -135,6 +138,7 @@
     e.stopImmediatePropagation();
     const body = collect();
     if (home && home.validate(body)) return;
+    if (people && people.validate(body)) return;
     const stored = JSON.parse(form.dataset.settings);
     if (same(body, stored)) { tb.toast('No changes', 'ok'); refresh(); return; }
     if (form.dataset.review === 'safety') {

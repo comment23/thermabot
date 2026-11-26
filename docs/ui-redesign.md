@@ -7,12 +7,16 @@ The interface is a calm status screen. It answers three questions: what mode the
 Every signed-in page shows one status bar:
 
 - A mode pill: **Stopped**, **Shadow**, or **Active**. Setup needed uses the same pill in gray.
-- A link to the Owner's Watch evidence review, rather than an elapsed-time-only progress claim.
-- Home Assistant and weather chips. Color is always paired with the word and a dot.
+- Brand and mode stay together on the left; actions are grouped on the right.
+- **System status** groups Home Assistant, weather, live-update status and the Owner's
+  Watch evidence review in one expandable panel, rather than a row of competing pills.
+  Its summary signals **Needs attention** or **Reconnecting** without opening the panel.
 - **Stop**, one tap that opens a sheet. In Watch the sheet says no thermostat write is made;
   in Control it shows the configured stop band and explains that safety checks may prevent
   the handoff. **Start watching** always starts in Shadow.
-- On a phone the bar keeps the mode pill and Stop. Soak and health chips hide.
+- Stop uses the same compact, prominent button on every screen. On a phone the brand,
+  mode, Stop and named status/account icons remain available; system details do not disappear.
+- The account menu groups Account, Switch theme and Log out. Theme selection still persists.
 
 Home and Safety & control show a dedicated Thermabot controls card. Start watching always
 starts SHADOW; Stop explains whether a guarded comfort handoff will be attempted.
@@ -39,6 +43,29 @@ Settings tasks:
 | Advanced | Planner, metrics, alerts, summary, and the read-only JSON view |
 | Backup, Health, Account | Existing recovery, health, and password pages |
 
+The Settings navigation stays visible on Backup, Health, Account and Users, with the
+current destination highlighted. Links remain relative and capability-gated: administrators
+can reach Health, while Backup and user management remain Owner-only. Members' Account page
+does not expose the privileged Settings navigation.
+
+## People and presence
+
+Setup and Home & rooms share an **Add person** editor. Presence mappings are configurable
+for any household; they are separate from Thermabot login accounts. Each person has a name,
+a Home Assistant presence entity and an optional preferred tracker, which takes priority
+while fresh. Names added or renamed in the editor become lowercase underscore-separated keys;
+unchanged saved names are preserved.
+
+Owners can refresh named `person` and `device_tracker` suggestions. Entity IDs can also be
+entered manually in Settings, including saved entities that discovery cannot currently find.
+Setup still verifies selected trackers against discovered Home Assistant entities.
+Missing names/trackers, duplicate names and excluded people are reported before saving.
+
+Adding, editing and removing people stays local to the form until Save succeeds. Removing
+a mapping never deletes a Home Assistant entity or a login account. With no people
+configured, the house always counts as occupied. Presence timing and the excluded list remain
+editable alongside the people editor. These changes do not start or stop thermostat control.
+
 ## Home
 
 Home starts with explicit lifecycle controls, followed by Right now, Next recommendation,
@@ -47,6 +74,16 @@ remain visible as waiting; stale readings remain hidden. Members see their own r
 read-only bands, not lifecycle controls.
 
 `GET /partials/{now,next,timeline,rooms,quick}` returns those cards. `app.js` refreshes Right now and Rooms on `tb:snapshot`, and the recommendation and timeline on `tb:plan`, with `htmx.ajax`.
+
+Each control tick reads configured Home Assistant temperature sensors once, before the
+controller evaluates room safety limits. The same readings feed the live snapshot and
+historical sample. Celsius sensors are converted to Fahrenheit internally; room freshness
+uses the newer of `last_reported` and `last_updated`, not the last temperature change.
+Missing, stale or future timestamps never make a room reading fresh. A failed or timed-out
+sensor is logged and shown as unavailable without discarding healthy rooms. Snapshot events
+refresh the Home readings automatically; the polling fallback refreshes the same cards.
+Room and auxiliary sensor mappings never authorize climate reads. Climate IDs in those
+mappings are ignored and logged; only the configured thermostat's read path may fetch it.
 
 ## Why a step
 
@@ -128,7 +165,8 @@ A `temp` Jinja filter and `tb.temp` render every temperature in the display unit
 - Stale thermostat: values dim and the page says writes are paused.
 - Weather down: the weather chip says stale and the plan says it is a fallback.
 - Degraded: an amber ring on the mode pill and the reason in words.
-- Live updates: a "live" tag. If the event stream drops, the tag says it is reconnecting and status polls every 30 seconds. The live region announces mode changes only.
+- Live updates: a "live" label in System status. If the event stream drops, System status
+  signals reconnection and status polls every 30 seconds. The live region announces mode changes only.
 - Stale room: dashed tile, an amber "Stale" tag, and the value hidden.
 
 ## Embedding

@@ -130,6 +130,16 @@
     return active ? 'Active' : 'Shadow';
   }
   let announced = '';
+  function refreshSystemStatus() {
+    const menu = $('[data-testid=system-menu]');
+    if (!menu) return;
+    const label = $('[data-testid=system-status-label]', menu);
+    const warning = menu.querySelector('[data-health]:not([data-health="ok"]), [data-testid=sensors-pill]');
+    const reconnecting = document.documentElement.dataset.live === 'poll';
+    menu.dataset.live = reconnecting ? 'poll' : 'sse';
+    label.textContent = warning ? 'Needs attention' : reconnecting ? 'Reconnecting' : 'System status';
+    $('summary', menu).setAttribute('aria-label', 'System status' + (warning ? ': needs attention' : reconnecting ? ': reconnecting' : ''));
+  }
   function setState(s) {
     if (s && (s.kill_switch === 'on' || s.kill_switch === 'off')) {
       updateKillButton(s.kill_switch, s.stop_retry_required);
@@ -195,6 +205,16 @@
       ha.dataset.health = s.ha_health;
       ha.lastChild.textContent = ' HA ' + (s.ha_health === 'down' ? 'down' : s.ha_health);
     }
+    if (s.weather) {
+      const weather = $('[data-testid=weather-chip]');
+      if (weather) {
+        weather.dataset.health = s.weather === 'ok' ? 'ok' : 'stale';
+        weather.lastChild.textContent = s.weather === 'ok' ? 'Weather ok' : 'Weather stale';
+      }
+      const notice = $('[data-testid=weather-pill]');
+      if (notice) notice.textContent = s.weather === 'ok' ? 'Weather ok' : 'Weather stale';
+    }
+    refreshSystemStatus();
     const live = $('#live-status');
     if (live && prev && prev !== s.state && announced !== text) {
       announced = text;
@@ -207,18 +227,23 @@
   let polling = null;
   async function poll() {
     const r = await api('GET', 'api/status');
-    if (r.ok) { setState(r.data); document.dispatchEvent(new CustomEvent('tb:status', { detail: r.data })); }
+    if (r.ok) {
+      setState(r.data);
+      document.dispatchEvent(new CustomEvent('tb:status', { detail: r.data }));
+      refreshHome('snapshot');
+    }
   }
   function startPolling() {
     if (polling) return;
     document.documentElement.dataset.live = 'poll';
+    refreshSystemStatus();
     polling = setInterval(poll, 30000);
   }
   function startLive() {
     if (!$('#state-badge')) return;
     if (!window.EventSource || document.documentElement.dataset.nosse) { startPolling(); return; }
     const es = new EventSource(abs('events'));
-    es.addEventListener('open', () => { document.documentElement.dataset.live = 'sse'; });
+    es.addEventListener('open', () => { document.documentElement.dataset.live = 'sse'; refreshSystemStatus(); });
     es.addEventListener('state', (e) => setState(JSON.parse(e.data)));
     for (const ev of ['snapshot', 'plan', 'alert']) {
       es.addEventListener(ev, (e) => {
@@ -515,6 +540,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     startLive(); countdown(); labelToggle(); tracks();
     refreshActiveButton();
+    refreshSystemStatus();
     $('[data-testid=settings-nav] [aria-current=page]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
     sheetGesture($('#stop-sheet'));
     sheetGesture($('#confirm-sheet'));

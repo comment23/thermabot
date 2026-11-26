@@ -2,8 +2,8 @@
   {% for key, title in tasks %}
   <li><a href="{{ up }}{{ 'settings' if key == 'comfort' else 'settings/' + key }}"{% if task == key or (task == 'comfort' and key == 'comfort') %} aria-current="page"{% endif %}>{{ title }}</a></li>
   {% endfor %}
-  {% if p.can('edit_safety') %}<li><a href="{{ up }}recovery" data-testid="recovery-link">Backup</a></li>
-  <li><a href="{{ up }}health">Health</a></li>{% endif %}
-  <li><a href="{{ up }}account">Account</a></li>
-  {% if p.can('manage_users') %}<li><a href="{{ up }}users">Users</a></li>{% endif %}
+  {% if p.can('edit_safety') %}<li><a href="{{ up }}recovery" data-testid="recovery-link"{% if task == 'recovery' %} aria-current="page"{% endif %}>Backup</a></li>{% endif %}
+  {% if p.can('view_health') %}<li><a href="{{ up }}health"{% if task == 'health' %} aria-current="page"{% endif %}>Health</a></li>{% endif %}
+  <li><a href="{{ up }}account"{% if task == 'account' %} aria-current="page"{% endif %}>Account</a></li>
+  {% if p.can('manage_users') %}<li><a href="{{ up }}users"{% if task == 'users' %} aria-current="page"{% endif %}>Users</a></li>{% endif %}
 </ul></nav>

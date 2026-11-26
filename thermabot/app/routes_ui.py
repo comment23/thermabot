@@ -187,6 +187,12 @@ def render(
         "nav": _tabs(p),
         "icons": TAB_ICONS,
         "section": _section(path),
+        "task": path.rsplit("/", 1)[-1],
+        "tasks": [
+            (key, forms.TASK_TITLES[key])
+            for key in ("comfort", "schedule", "safety", "ha", "people", "advanced")
+            if p is not None and p.can("edit_comfort") and (key != "safety" or p.can("edit_safety"))
+        ],
         "path": path,
         "up": "../" * depth,
         "charts": charts,
@@ -628,11 +634,6 @@ def _settings_ctx(c: Ctx, p: Principal, task: str) -> dict[str, Any]:
         "sections": forms.sections(s, owner=p.can("edit_safety"), only=only),
         "task": task,
         "task_title": forms.TASK_TITLES.get(task, "Settings"),
-        "tasks": [
-            (key, forms.TASK_TITLES[key])
-            for key in ("comfort", "schedule", "safety", "ha", "people", "advanced")
-            if key != "safety" or p.can("edit_safety")
-        ],
         "readiness": ready,
         "recent_decisions": recent,
         "assigned_rooms": [

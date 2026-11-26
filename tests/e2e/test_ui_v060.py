@@ -329,6 +329,7 @@ def test_theme_toggle_persists(browser: Browser, srv: Srv) -> None:
     pg = _ctx_page(browser, srv, PHONE)  # light system scheme
     login(pg, srv, "alex")
     assert not _bg_dark(pg)
+    pg.locator("[data-testid=account-menu] summary").click()
     btn = pg.locator("[data-testid=theme-toggle]")
     box = btn.bounding_box()
     assert box is not None and box["height"] >= 44 - 0.5
@@ -338,6 +339,7 @@ def test_theme_toggle_persists(browser: Browser, srv: Srv) -> None:
     pg.goto(f"{srv.url}/plan")  # stored in localStorage, applied before paint
     expect(pg.locator("html")).to_have_attribute("data-theme", "dark")
     assert _bg_dark(pg)
+    pg.locator("[data-testid=account-menu] summary").click()
     pg.locator("[data-testid=theme-toggle]").click()
     expect(pg.locator("html")).to_have_attribute("data-theme", "light")
     assert not _bg_dark(pg)

@@ -30,7 +30,15 @@ from thermabot.core.safety import OffWindow
 from thermabot.core.schedule import active_zone, block_at
 from thermabot.core.shadow import MinuteRow, Setpoints
 from thermabot.core.thermal import Sample, ThermalParams, U, confidence, holdout_mae
-from thermabot.core.types import Forecast, Plan, PlanStep
+from thermabot.core.types import (
+    Forecast,
+    Plan,
+    PlanStep,
+    Presence,
+    RoomReading,
+    Snapshot,
+    ThermostatState,
+)
 from thermabot.core.weather import forecast_at
 
 log = logging.getLogger(__name__)
@@ -411,6 +419,62 @@ def _temp_f(st: dict[str, Any] | None) -> float | None:
     return None
 
 
+def room_readings(
+    now: datetime,
+    s: Settings,
+    th: ThermostatState | None,
+    states: dict[str, dict[str, Any] | None],
+) -> dict[str, RoomReading]:
+    readings: dict[str, RoomReading] = {}
+    for key, cfg in s.rooms.items():
+        st = states.get(cfg.temp)
+        if key == "thermostat":
+            temp = None if th is None else th.current_temp
+            reported = None if th is None else th.last_reported
+            updated = None
+        else:
+            temp = _temp_f(st)
+            reported = None if st is None else _stamp(st, "last_reported")
+            updated = None if st is None else _stamp(st, "last_updated")
+        age = room_age_min(now, reported, updated)
+        stamps = [stamp for stamp in (reported, updated) if stamp is not None]
+        readings[key] = RoomReading(
+            key=key,
+            temp=temp,
+            last_reported=max(stamps) if stamps else None,
+            age_min=None if age is None else round(age, 1),
+            stale=temp is not None and (age is None or age < 0 or age > cfg.stale_min),
+        )
+    return readings
+
+
+def sensor_snapshot(
+    now: datetime,
+    s: Settings,
+    th: ThermostatState,
+    states: dict[str, dict[str, Any] | None],
+    presence: Presence | None,
+    forecast: Forecast | None,
+) -> Snapshot:
+    current = th.model_copy(
+        update={
+            "outdoor_temp": _temp_f(states.get(s.sensors.outdoor))
+            if s.sensors.outdoor
+            else th.outdoor_temp,
+            "humidity": _state_num(states.get(s.sensors.humidity))
+            if s.sensors.humidity
+            else th.humidity,
+        }
+    )
+    return Snapshot(
+        t=now,
+        thermostat=current,
+        rooms=room_readings(now, s, current, states),
+        presence=presence,
+        forecast=forecast,
+    )
+
+
 def sample_doc(
     now: datetime,
     s: Settings,
@@ -429,16 +493,11 @@ def sample_doc(
     humidity = None if th is None else th.humidity
     if sn.humidity:
         humidity = _state_num(states.get(sn.humidity))
-    rooms: dict[str, dict[str, float | None]] = {}
-    for key, cfg in s.rooms.items():
-        if key == "thermostat":
-            continue
-        st = states.get(cfg.temp)
-        if st is None:
-            rooms[key] = {"temp": None, "age_min": None}
-            continue
-        age = room_age_min(now, _stamp(st, "last_reported"), _stamp(st, "last_updated"))
-        rooms[key] = {"temp": _temp_f(st), "age_min": None if age is None else round(age, 1)}
+    rooms = {
+        key: {"temp": reading.temp, "age_min": reading.age_min}
+        for key, reading in room_readings(now, s, th, states).items()
+        if key != "thermostat"
+    }
     opening_states = {eid: states.get(eid) for eid in s.openings.sensors}
     return {
         "tstat": None

@@ -78,6 +78,31 @@ def test_branding_is_visible_and_local(
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-UI-1")
+@pytest.mark.parametrize("width", [375, 768, 1024, 1440])
+def test_header_groups_status_and_keeps_stop_accessible(page: Page, srv: Srv, width: int) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    login(page, srv, "alex")
+    expect(page.locator("[data-header-identity] [data-testid=state-badge]")).to_be_visible()
+    stop = page.locator("[data-header-actions] [data-testid=kill-open]")
+    expect(stop).to_be_visible()
+    box = stop.bounding_box()
+    assert box is not None and 43.5 <= box["height"] <= 52
+    page.get_by_role("button", name="System status", exact=True).click()
+    expect(page.locator("[data-testid=ha-chip]")).to_be_visible()
+    expect(page.locator("[data-testid=weather-chip]")).to_be_visible()
+    expect(page.locator("[data-testid=shadow-days]")).to_be_visible()
+    srv.ctx.broker.publish("state", {"state": "SHADOW", "label": "SHADOW", "ha_health": "down"})
+    expect(page.locator("[data-testid=ha-chip]")).to_contain_text("down")
+    expect(page.locator("[data-testid=system-status-label]")).to_have_text("Needs attention")
+    page.locator("[data-testid=system-menu] summary").click()
+    expect(stop).to_be_visible()
+    stop.click()
+    expect(page.get_by_role("dialog", name="Stop", exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    assert_page_healthy(page, srv)
+
+
 @pytest.mark.brd("NFR-A11Y-1")
 @pytest.mark.parametrize("width", [390, 1440])
 def test_keyboard_skip_link_and_control_dialog_names(page: Page, srv: Srv, width: int) -> None:

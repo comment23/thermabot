@@ -1,5 +1,17 @@
 # thermabot add-on changelog
 
+## 0.6.8-rc.12 - 2026-11-26 (prerelease)
+
+- Restore live Home Assistant sensor temperatures, shared conversion/freshness handling
+  and dashboard refresh. Reject climate entities in room/auxiliary sensor mappings.
+- Keep Settings tabs visible on utility pages, simplify header controls, and add editable
+  presence people in setup and Settings.
+- Include the application fixes verified by 24 passing customer checks and 1,307 passing
+  local tests. The simulated UAT harness is developer tooling, not part of the add-on image.
+- Publish new `0.6.8-rc.12` images from `main` after CI, without overwriting rc.11.
+  The in-app version remains `0.6.8`; updating does not enable Control. Stable v0.6.8
+  remains blocked on the documented live SHADOW soak and Owner review.
+
 ## 0.6.8-rc.11 - 2026-11-25 (prerelease)
 
 - Add a one-start, Owner-only Watch-evidence exception under Safety and control for reviewed

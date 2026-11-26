@@ -4,8 +4,9 @@
   {% if sec.name == 'seasonal_control' %}
   <p class="meta">The 24-hour outdoor forecast guides heat-only or cool-only operation. Home and sleep bands change at their scheduled times.</p>
   {% endif %}
+  {% if sec.name == 'presence' %}{% include "partials/people_editor.html" %}{% endif %}
   <fieldset{% if sec.locked %} disabled{% endif %}>
-  {% for f in sec.fields %}
+  {% for f in sec.fields if not f.path.startswith('presence.people.') %}
     {% if f.kind == 'bool' %}
     <label class="field" for="{{ f.id }}"><input type="checkbox" role="switch" id="{{ f.id }}" data-path="{{ f.path }}" data-kind="bool"{% if f.value %} checked{% endif %}> {{ f.label }}</label>
     {% elif f.kind == 'select' %}

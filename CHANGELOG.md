@@ -5,6 +5,26 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.6.8-rc.12 - 2026-11-26 (prerelease)
+
+The Home Assistant add-on catalog version is `0.6.8-rc.12`, published from `main` only
+after CI passes. The in-app version remains `0.6.8`. This candidate does not enable
+Control or satisfy the seven-day SHADOW soak and Owner-review gates for stable v0.6.8.
+
+- Populate live room, outdoor and humidity readings before controller guards, using the
+  same temperature conversion and freshness rules as history. Refresh Home after samples,
+  isolate unavailable/slow sensors, and reject climate entities in auxiliary sensor mappings.
+- Keep Settings navigation visible on utility pages, preserve role restrictions, and
+  reorganize the header into clear operating controls, System status and Account menus.
+- Add a shared Add person / Remove person presence editor in setup and Settings, with
+  validation, Home Assistant suggestions and changes applied only on save.
+- Add an isolated, SHADOW-only customer UAT harness, a 60-case acceptance plan, fault
+  scenarios and desktop/mobile journeys. All 24 automated customer checks pass in the
+  corrected-code retest; the full local suites pass 1,307 tests. Real HA installation,
+  physical actuation, offline recovery and the live soak remain separate, unverified gates.
+- Use a new add-on image version rather than overwrite the published rc.11 images.
+  This source/image publication does not create a GitHub release or version tag.
+
 ## 0.6.8-rc.11 - 2026-11-25 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.11`. The in-app version remains

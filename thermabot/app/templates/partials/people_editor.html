@@ -1,0 +1,15 @@
+<section class="card people-editor" data-people-editor data-can-discover="{{ 1 if p.can('edit_safety') else 0 }}">
+  <div class="card-head"><h3>People for presence</h3>
+    <button type="button" data-people-add>Add person</button></div>
+  <p class="meta">Add anyone whose Home Assistant presence counts for home and away.
+    These are presence mappings, not Thermabot login accounts. Changes apply only when you save.</p>
+  <p class="meta">Choose or enter a <code>person</code> or <code>device_tracker</code> entity.
+    A preferred tracker is optional and takes priority while fresh.</p>
+  <div data-people-rows></div>
+  <p class="empty" data-people-empty>No people configured. The house always counts as occupied.</p>
+  <p class="meta" data-people-status aria-live="polite"></p>
+  {% if p.can('edit_safety') %}<button type="button" class="secondary outline" data-people-refresh>Refresh presence suggestions</button>{% endif %}
+  <p class="errors" data-people-errors role="alert"></p>
+  <datalist id="presence-entities"></datalist>
+  <noscript><p class="banner">Enable JavaScript to add or remove people. No settings have changed.</p></noscript>
+</section>
