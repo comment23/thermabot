@@ -104,12 +104,16 @@ def test_sample_doc_fields_and_nulls() -> None:
     }
     d = J.sample_doc(now, HOUSE, th, states, None, None, None, "OCCUPIED")
     assert d["tstat"]["cool_sp"] == 76 and d["tstat"]["hvac_action"] == "cooling"
+    assert d["tstat"]["age_min"] is None
     assert d["blower"] == 1.0 and d["cs_raw"] == 40 and d["cs"] == pytest.approx(0.4)
     assert d["t_out"] is None and d["t_out_fc"] is None and d["bot"] is None
     assert d["rooms"]["study"] == {"temp": 72.5, "age_min": 10.0}
     assert d["rooms"]["bedroom_1"] == {"temp": None, "age_min": None}
     assert "thermostat" not in d["rooms"] and d["house"] == "OCCUPIED"
     json.dumps(d)  # serialisable
+    th.last_reported = now - timedelta(minutes=5)
+    fresh = J.sample_doc(now, HOUSE, th, states, None, None, None, "OCCUPIED")
+    assert fresh["tstat"]["age_min"] == 5
 
 
 @pytest.mark.brd("FR-PLN-3")

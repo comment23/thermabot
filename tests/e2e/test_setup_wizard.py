@@ -364,7 +364,7 @@ def test_wizard_tap_targets_and_dark_mode(browser: Browser, srv: Srv) -> None:
 @pytest.mark.brd("FR-UI-1")
 def test_settings_desktop_layout(desktop: Page, srv: Srv) -> None:
     login(desktop, srv, "alex")
-    desktop.goto(f"{srv.url}/settings")
+    desktop.goto(f"{srv.url}/settings/advanced")
     assert desktop.evaluate("document.documentElement.scrollWidth") <= DESKTOP["width"]
     # forms per section, multi-column at desktop width
     fs = desktop.locator("[data-testid=section-bands] fieldset")

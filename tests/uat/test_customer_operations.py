@@ -71,7 +71,7 @@ def test_customer_saved_comfort_band_reaches_controller_on_next_tick(
     page: Page, srv: Srv, lab: Lab
 ) -> None:
     login(page, srv, "ann")
-    page.goto(srv.url + "/settings")
+    page.goto(srv.url + "/settings/advanced")
     _open(page, "bands")
     page.fill("[data-path='bands.heat.home.0']", "67")
     page.click("[data-testid=settings-save]")

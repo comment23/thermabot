@@ -1,5 +1,19 @@
 # thermabot add-on changelog
 
+## 0.7.0-rc.1 - 2026-11-26 (prerelease)
+
+- Application version 0.7.0, with room insights, temperature tables, all ten researched
+  efficiency tools, room tabs, setup readiness and temperature/simulation visuals.
+- Simplify primary Settings to ideal temperature, a comfort/efficiency slider and important
+  rooms. Preview and explicit approval are required; technical settings remain in Advanced.
+- Retain safety and Control gates, existing schedules/Away settings and passive equipment.
+  Migration 005 preserves existing samples and adds home-improvement experiment metadata.
+- Include updated customer UAT: 38 customer/lab cases and 43 targeted room regressions
+  pass, including validated simulated model/history and offline-copy retention.
+- Images publish from `main` and the matching version tag after CI. Wait for successful
+  `addon-publish` and anonymous manifest resolution before installing. This prerelease
+  does not satisfy live HA/platform, seven-day SHADOW or Owner-review gates.
+
 ## 0.6.8-rc.12 - 2026-11-26 (prerelease)
 
 - Restore live Home Assistant sensor temperatures, shared conversion/freshness handling

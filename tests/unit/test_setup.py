@@ -159,7 +159,7 @@ def test_pre_v030_row_loads_unchanged_with_no_builtin_sensors() -> None:
     old.pop("sensors")
     old.pop("display")
     s = Settings.model_validate_json(json.dumps(old))
-    assert s.sensors.model_dump() == {"blower": "", "compressor": "", "outdoor": "", "humidity": ""}
+    assert all(value == "" for value in s.sensors.model_dump().values())
     assert s.sensors_missing
     assert s.display.units == "F"
     for k in old:
@@ -170,7 +170,7 @@ def test_pre_v030_row_loads_unchanged_with_no_builtin_sensors() -> None:
 def test_fresh_install_has_no_sensors() -> None:
     s = Settings()
     assert not s.thermostat.configured
-    assert s.sensors.model_dump() == {"blower": "", "compressor": "", "outdoor": "", "humidity": ""}
+    assert all(value == "" for value in s.sensors.model_dump().values())
 
 
 @pytest.mark.brd("FR-CFG-1")

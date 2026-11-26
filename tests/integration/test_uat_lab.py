@@ -10,7 +10,9 @@ import httpx
 import pytest
 
 from scripts.uat import SimulatedHA, create_lab
+from thermabot.adapters import db
 from thermabot.adapters.ha_rest import HAError
+from thermabot.core.statemachine import Persisted
 
 
 @pytest.mark.brd("NFR-SAFE-1")
@@ -105,5 +107,66 @@ async def test_uat_weather_fixtures_remain_current_during_multiday_sessions(tmp_
                 )
             periods = response.json()["properties"]["periods"]
             assert datetime.fromisoformat(periods[0]["startTime"]) == future
+    finally:
+        await lab.runtime.aclose()
+
+
+@pytest.mark.brd("NFR-SAFE-1")
+async def test_room_replay_uses_runtime_samples_only_while_stopped(tmp_path: Path) -> None:
+    lab = create_lab(tmp_path)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=lab.app), base_url="http://uat.test"
+        ) as client:
+            headers = {"X-Thermabot-UAT": "1"}
+            response = await client.post(
+                "/uat/api/scenario", headers=headers, json={"name": "room-evidence"}
+            )
+            assert response.status_code == 200
+            evidence = response.json()
+            assert evidence["historical_replay_minutes"] == 3
+            assert evidence["sample_count"] == 3 and evidence["kill_switch"] == "off"
+            assert evidence["latest_sample"]["rooms"]["study"]["temp"] == 73
+            assert evidence["climate_service_calls"] == evidence["blocked_climate_requests"] == []
+            db.write_bot_state(
+                lab.runtime.conn,
+                Persisted(kill_switch="on", run_mode="shadow"),
+                by="test",
+                now=datetime.now(UTC),
+            )
+            response = await client.post(
+                "/uat/api/scenario", headers=headers, json={"name": "room-evidence"}
+            )
+            assert response.status_code == 409 and lab.evidence()["sample_count"] == 3
+    finally:
+        await lab.runtime.aclose()
+
+
+@pytest.mark.brd("NFR-SAFE-1")
+@pytest.mark.parametrize("scenario", ["room-evidence", "room-history", "room-model"])
+async def test_all_uat_replays_refuse_watch_and_block_start_during_replay(
+    tmp_path: Path, scenario: str
+) -> None:
+    lab = create_lab(tmp_path)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=lab.app), base_url="http://uat.test"
+        ) as client:
+            db.write_bot_state(
+                lab.runtime.conn,
+                Persisted(kill_switch="on", run_mode="shadow"),
+                by="test",
+                now=datetime.now(UTC),
+            )
+            response = await client.post(
+                "/uat/api/scenario",
+                headers={"X-Thermabot-UAT": "1"},
+                json={"name": scenario},
+            )
+            assert response.status_code == 409 and lab.evidence()["sample_count"] == 0
+            lab.replaying = True
+            response = await client.post("/api/kill", json={"enabled": True, "mode": "shadow"})
+            assert response.status_code == 409 and "replay to finish" in response.text
+            assert lab.evidence()["climate_service_calls"] == []
     finally:
         await lab.runtime.aclose()

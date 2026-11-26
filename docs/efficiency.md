@@ -93,3 +93,151 @@ labels them SIMULATED. Days without a fitted model have no bot estimate and do n
   `efficiency backfill done: N days written of M candidates; qualifying heat H, cool C; ...`.
 - Existing stored rows are not automatically recalculated when the daylight-saving
   calculation changes.
+
+## Room insights, temperature table and efficiency indicators
+
+Open a room from Home to see its read-only report. Members can inspect only their assigned
+room; Owners and Admins can select any configured room. Existing nudge permissions and
+limits are unchanged.
+
+- The **room summary** shows the latest temperature, its difference from the configured
+  ideal (73 F by default), last-week ideal-band comfort and the highest-priority action.
+  Unknown-age, stale or estimated live readings never produce an ideal-temperature delta.
+- **Overview**, **Temperatures**, **Efficiency** and **Tools** are server-rendered tabs.
+  Room selection and the history range persist between tabs; navigation and the
+  temperature table work without JavaScript. **Adjust room / Nudges** is always accessible
+  above the tabs, with active nudges expanded for cancellation.
+- The **Temperatures** tab charts interval means with an ideal-reference line and shaded
+  tolerance band. Missing/stale intervals stay as gaps, including when only a single
+  measured interval is present. The table remains the accessible alternative. Charts use
+  the existing local uPlot assets and configured Fahrenheit/Celsius display and time zone.
+  Table temperatures are rounded for display only; calculations retain sample precision.
+- The **Tools setup checklist** checks actual live-temperature, model-validation and
+  forecast gates before a simulation is requested; it does not run simulations or save
+  settings. It checks the default four-hour horizon plus four hours recovery; a longer
+  request rechecks coverage. Optional humidity/meter inputs do not block simulations.
+  Links go to existing settings/model pages only when the viewer has permission.
+- Simulation results show **Baseline / Proposed** runtime and ideal-band-comfort bars,
+  projected room ranges, estimated costs and differences. They remain explicitly
+  SIMULATED, with central-HVAC versus room scope and safety warnings.
+- Period labels distinguish the selected history range, fixed last-seven-day diagnostics
+  and two completed 14-day weather windows. Scheduled-band comfort is separate from the
+  ideal-band metric; central HVAC diagnostics are not attributed to an individual room.
+
+- Choose **24 h**, **7 days**, or **30 days**. Tables use 1-hour, 6-hour, or 24-hour elapsed
+  intervals respectively, display the configured local time zone, and retain gaps.
+- Insights show the mean, minimum, maximum, paired room-minus-thermostat difference and,
+  when both latest intervals have at least five measurements, the change between them.
+  Means weight each sampled minute equally, not each interval equally.
+- Missing temperatures, unknown/negative sensor ages, readings older than the room's
+  configured stale threshold, and recorded stale-room flags are excluded. Sensor samples
+  are measured inputs; model estimates are not substituted. Coverage is fresh measured
+  minutes divided by all elapsed minutes in the selected period, not just collected rows.
+  New samples record thermostat reading age too; older thermostat samples without that
+  field are explicitly unverified and excluded from these room metrics.
+- Comfort indicators compare measurements with the recorded schedule block's band using
+  **current saved settings**, room tolerance and the current forecast season. Without a
+  usable forecast, the reference is the shoulder-season band. Historical configuration,
+  weather-dependent seasons, humidity tightening and nudges are **not reconstructed**.
+  Missing schedule blocks are excluded from comfort comparisons.
+- Within-band percentage and outside-band minutes describe only assessed measurements.
+  Mean excursion is the average distance outside the reference band, including zeros for
+  in-band minutes. It is a temperature difference, including when displayed in Celsius.
+- Heating/cooling minutes are central HVAC observations during fresh room measurements.
+  They are **not independently measured room runtime, kWh, savings or equipment efficiency**.
+  Unknown runtime remains unavailable. The whole-home efficiency page retains its
+  weather-normalized curves and explicitly simulated savings.
+
+Reports aggregate the existing samples in SQLite and return at most 30 table intervals.
+They do not create database rows, change plans or call Home Assistant services. Assigned
+equipment remains passive inventory, not permission to meter or control a device.
+
+## Research-backed next ideas
+
+All ten features below are implemented as read-only evidence/tools, except that schedule
+approval explicitly saves a reviewed household schedule and recording an experiment saves
+its metadata. None enables Control or adds an actuator write path.
+
+1. Sensor-quality diagnostics for stale data, persistent disagreement and calibration drift.
+2. Weather-normalized performance alerts for increasing runtime under comparable conditions.
+3. Setback what-if comparisons showing simulated runtime and room comfort trade-offs.
+4. Meter-backed energy and cost reporting, separating actual measurements from allocations.
+5. Tariff-aware preheat/precool recommendations with comfort and equipment constraints.
+6. Heat-pump diagnostics for auxiliary heat and excessive cycling, where signals exist.
+7. Humidity-aware room comfort, with sensor-source and freshness labels.
+8. Approval-based schedule suggestions when observed occupancy differs from planned occupancy.
+9. Before/after experiments for insulation, shading and maintenance, adjusted for weather.
+10. Weekly room action reports ranked by evidence, expected benefit and comfort impact.
+
+### Using the research features
+
+- **Ideal reference:** 73 F (22.8 C) with a default 1 F tolerance. Configure
+  `insights.ideal_temp_f` and `insights.tolerance_f` in Settings > Advanced. This does not
+  silently overwrite existing thermostat comfort bands. The weekly report compares
+  measured room temperatures to this reference, separately from the scheduled-band table.
+- **Sensors:** Settings > Home & rooms lets you select each room's optional humidity sensor
+  and explicitly dedicated energy meter. Settings > Home Assistant exposes central HVAC
+  `sensors.energy`, `sensors.power`, and `sensors.auxiliary_heat` mappings. Only configured
+  mappings are read; passive equipment inventory does not infer a meter or grant control.
+  Energy accepts kWh, Wh or MWh; power accepts W or kW; humidity accepts percent. Unsupported
+  units are logged and discarded. Sensor age/source accompanies the stored measurements.
+- **Sensor quality:** last-week coverage and persistent paired disagreement (at least 120
+  fresh pairs, a mean offset of at least 2 F, and at least 80% consistently beyond 2 F).
+  This prompts a placement/airflow/calibration check, not a claim of proven sensor drift.
+- **Humidity:** joint temperature/RH comfort requires fresh paired measurements. The
+  reference RH range is 30-60%, with no invented feels-like temperature or health diagnosis.
+- **Energy:** uses cumulative meter deltas, or integrates measured power when no cumulative
+  meter readings exist. Only adjacent intervals up to two minutes with the same meter
+  source qualify; gaps, resets and source changes are excluded and counted. Coverage is
+  shown, not extrapolated. Central HVAC energy is never allocated to rooms without meters.
+- **Tariffs:** configure both `insights.off_peak_rate` and `insights.peak_rate`, currency,
+  local peak start/end hours, and optionally `rated_power_kw` for simulated costs. The
+  two-tier peak window cannot cross midnight. Meter-backed costs estimate covered energy
+  at configured local-hour rates; they do not include fixed charges or guarantee a bill.
+- **What-if tools:** compare a setback or tariff shift with the 73 F reference baseline.
+  They require fresh room/thermostat measurements, a complete fresh forecast, a validated
+  model with acceptable thermostat MAE, and a model fitted within 30 days. Each comparison
+  includes four recovery hours. Room projections explicitly assume a constant current
+  room/thermostat offset; there is no independent room thermal model. Simulated costs
+  require an explicitly configured rated-power assumption. Comfort loss or predicted
+  safety breaches prevent a recommendation. The tools never apply setpoints.
+- **Weather alerts:** compare the preceding and latest 14-day windows of central runtime
+  per degree-day. Each needs five qualifying days within 5 F of baseline median outdoor
+  temperature; a rise of at least 20% prompts review. This is a weather-adjusted runtime
+  proxy, not causal energy savings.
+- **Heat-pump/HVAC diagnostics:** detect observed starts and completed short runs only
+  across contiguous, known equipment-state samples. Three runs shorter than three minutes
+  prompt review. Actual auxiliary heat requires its own fresh mapped signal; temperature
+  spikes do not stand in for auxiliary-heat measurements. Compressor speed is not kWh.
+- **Schedule suggestions:** at least five days, each with 48 or more samples in a complete
+  scheduled Home hour, must consistently show at least 80% Away. Owner/Admin approval
+  changes only that weekday/weekend hour, preserves other boundaries and restores the
+  prior block afterward. Stale settings fingerprints or lost evidence reject approval.
+- **Experiments:** record an improvement and its change date (today or within the last
+  14 days). Migration 005 adds `room_experiments`; existing samples are untouched. The
+  report compares 14-day weather-normalized windows before and after the change, waits
+  for adequate evidence, and flags later settings changes as a confounder. Completed
+  comparisons remain readable beyond the room's 30-day sample window while their daily
+  rollups remain available.
+- **Weekly actions:** the room page automatically summarizes the last seven days and
+  ranks sensor, comfort, humidity, equipment and performance findings with their evidence.
+  These are on-demand local reports, not outbound notifications or guaranteed savings.
+
+Authenticated endpoints are `GET /api/rooms/{room}/insights`,
+`POST /api/rooms/{room}/what-if`, `POST /api/rooms/{room}/schedule-approval`, and
+`POST /api/rooms/{room}/experiments`. Members can read/simulate only their assigned room.
+Saving a schedule or experiment requires Owner/Admin permissions; browser POSTs require
+CSRF. New reports use at most 30 days of raw samples and do not silently replace missing
+inputs with assumed measurements.
+
+Sources reviewed November 25, 2026:
+
+- [ecobee eco+](https://www.ecobee.com/en-us/eco-plus/): humidity adjustments, schedule
+  assistance, occupancy and time-of-use optimization.
+- [tado Heat Pump Optimizer X](https://www.tado.com/en/products/heat-pumps): room-guided
+  operation and equipment-integrated energy information.
+- [ENERGY STAR smart thermostat guidance](https://www.energystar.gov/products/energy_star_home_upgrade/smart_thermostats):
+  compatibility and real-world savings evidence rather than assumed savings.
+
+Vendor savings claims are not predictions for a Thermabot household. New actuator behavior
+requires separate authorization, SHADOW evaluation, equipment safeguards and Owner approval.

@@ -21,8 +21,9 @@
     const included = (row) => $('[data-r=on]', row).checked;
     const floors = () => new Set([...drafts, ...rows().map((r) => $('[data-r=floor]', r).value.trim()).filter(Boolean)]);
 
-    function options(current = '', temperature = false) {
-      const list = entities.filter((e) => !temperature || temperatureIds.has(e.entity_id));
+    function options(current = '', temperature = false, sensorOnly = false) {
+      const list = entities.filter((e) => (!temperature || temperatureIds.has(e.entity_id))
+        && (!sensorOnly || e.entity_id.startsWith('sensor.')));
       if (current && !list.some((e) => e.entity_id === current)) {
         const known = entities.find((e) => e.entity_id === current);
         list.unshift(known || { entity_id: current, name: current + ' (saved; not discovered)' });
@@ -80,6 +81,8 @@
         <input type="hidden" data-r="key" value="${esc(key)}">
         <div class="grid-2">
           <label>Temperature sensor<select data-r="temp"${key === 'thermostat' ? ' disabled' : ''}>${options(c.temp, true)}</select></label>
+          <label>Humidity sensor (read only)<select data-r="humidity">${options(c.humidity, false, true)}</select></label>
+          <label>Dedicated room energy meter (read only)<select data-r="energy">${options(c.energy, false, true)}</select></label>
           <label>Floor<input data-r="floor" list="home-floor-options" maxlength="64" value="${esc(c.floor)}" placeholder="Choose or name a floor"></label>
         </div>
         <details data-room-devices><summary>Additional equipment (read only)</summary>
@@ -111,6 +114,7 @@
         const key = row.dataset.homeRoom;
         const base = original.rooms[key] || { tol: 0, stale_min: 60, dead_min: 360, aux_heat_detect: false };
         const cfg = { ...base, temp: $('[data-r=temp]', row).value, floor: $('[data-r=floor]', row).value.trim(),
+          humidity: $('[data-r=humidity]', row).value, energy: $('[data-r=energy]', row).value,
           devices: JSON.parse(row.dataset.devices), aux_heat_detect: $('[data-r=aux_heat_detect]', row).checked };
         for (const k of ['tol', 'stale_min', 'dead_min']) {
           const input = $(`[data-r=${k}]`, row);
@@ -166,6 +170,10 @@
       for (const row of rows()) {
         const select = $('[data-r=temp]', row);
         select.innerHTML = options(select.value, true);
+        for (const key of ['humidity', 'energy']) {
+          const sensor = $(`[data-r=${key}]`, row);
+          sensor.innerHTML = options(sensor.value, false, true);
+        }
         $('[data-room-device-picker]', row).innerHTML = options();
         equipment(row);
       }

@@ -10,6 +10,8 @@
 
 - [ ] `ruff format --check .`, `ruff check .`, `mypy --strict thermabot` pass
 - [ ] `pytest tests/unit tests/integration` and `pytest tests/e2e` pass
+- [ ] UAT playbook and customer journeys match all program changes; current candidate UAT ran as pre-shipping QA
+- [ ] UAT evidence identifies the tested source, outcomes and unrun gates; no unresolved P0/P1 failures or stale acceptance
 - [ ] New tests carry `@pytest.mark.brd(...)`
 - [ ] Only `app/controller.py` calls `_call_service`; no new write path bypasses the guards
 - [ ] Writes are still denied when no thermostat is configured; SHADOW stays the default

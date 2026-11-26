@@ -141,3 +141,107 @@ def test_asset_cache_key_changes_for_same_version(
         assert before != after
     finally:
         UI.asset.cache_clear()
+
+
+def _room_doc(temp: object, age: object = 0, block: str = "home") -> dict[str, object]:
+    return {
+        "tstat": {"temp": 70, "age_min": 0, "hvac_action": "heating" if temp == 70 else "cooling"},
+        "t_out_fc": 40,
+        "block": block,
+        "rooms": {
+            "bedroom_1": {"temp": temp, "age_min": age},
+            "study": {"temp": 99, "age_min": 0},
+        },
+    }
+
+
+@pytest.mark.brd("FR-UI-1")
+def test_room_report_weights_minutes_and_excludes_untrusted_readings(tmp_path: Path) -> None:
+    ctx, _, _ = make(tmp_path)
+    for m in range(1, 7):
+        J.save_sample(ctx.conn, NOW - timedelta(minutes=m), _room_doc(70), "SHADOW", 90, [])
+    for m in range(61, 64):
+        J.save_sample(ctx.conn, NOW - timedelta(minutes=m), _room_doc(64), "SHADOW", 90, [])
+    for m, temp, age, stale in (
+        (10, 99, None, []),
+        (11, 99, 91, []),
+        (12, 99, 0, ["bedroom_1"]),
+        (13, None, 0, []),
+        (14, True, 0, []),
+    ):
+        J.save_sample(
+            ctx.conn, NOW - timedelta(minutes=m), _room_doc(temp, age), "SHADOW", 90, stale
+        )
+    before = ctx.conn.total_changes
+    r = H.room_report(ctx.conn, NOW, "24h", "bedroom_1", ctx.settings, "shoulder")
+    assert ctx.conn.total_changes == before
+    assert (r["measured"], r["stale"], r["missing"]) == (9, 3, 2)
+    assert r["mean"] == 68 and (r["low"], r["high"]) == (64, 70)
+    assert r["comfort_pct"] == pytest.approx(100 * 6 / 9)
+    assert r["excursion"] == pytest.approx(2 / 3) and r["outside_min"] == 3
+    assert r["offset"] == -2 and (r["heat_min"], r["cool_min"]) == (6, 3)
+    assert r["coverage_pct"] == pytest.approx(100 * 9 / 1440)
+    assert r["change"] is None  # too few measurements in the previous interval
+    assert r["rows"][0]["temp"] is None  # no fill-forward across gaps
+
+
+@pytest.mark.brd("FR-UI-1")
+@pytest.mark.parametrize(("rng", "intervals"), [("24h", 24), ("7d", 28), ("30d", 30)])
+def test_room_report_range_bounds_and_thermostat(tmp_path: Path, rng: str, intervals: int) -> None:
+    ctx, _, _ = make(tmp_path)
+    for t, doc, stale in (
+        (NOW, _room_doc(70), []),
+        (NOW + timedelta(minutes=1), _room_doc(99), []),
+        (NOW - H.RANGES[rng], _room_doc(99), []),
+        (NOW - timedelta(minutes=1), _room_doc(99), ["thermostat"]),
+    ):
+        J.save_sample(ctx.conn, t, doc, "SHADOW", 90, stale)
+    r = H.room_report(ctx.conn, NOW, rng, "thermostat", ctx.settings, "heat")
+    assert len(r["rows"]) == intervals and r["measured"] == 1 and r["stale"] == 1
+    assert r["mean"] == 70 and r["comfort_pct"] == 100 and r["offset"] == 0
+    assert r["rows"][-1]["end"].timestamp() == NOW.timestamp() + 60
+
+
+@pytest.mark.brd("FR-UI-1")
+def test_room_report_reference_blocks_and_unknown_runtime(tmp_path: Path) -> None:
+    ctx, _, _ = make(tmp_path)
+    for m, block in enumerate(("home", "sleep", "unknown")):
+        doc = _room_doc(65, block=block)
+        doc["tstat"] = {"temp": None, "hvac_action": None}
+        J.save_sample(ctx.conn, NOW - timedelta(minutes=m), doc, "SHADOW", None, [])
+    r = H.room_report(ctx.conn, NOW, "24h", "bedroom_1", ctx.settings, "shoulder")
+    assert r["measured"] == 3 and r["assessed"] == 2
+    assert r["comfort_pct"] == 50 and r["outside_min"] == 1
+    assert r["offset"] is None and r["heat_min"] is None and r["cool_min"] is None
+
+
+@pytest.mark.brd("FR-UI-1")
+def test_legacy_thermostat_samples_do_not_claim_verified_freshness(tmp_path: Path) -> None:
+    ctx, _, _ = make(tmp_path)
+    doc = _room_doc(70)
+    doc["tstat"] = {"temp": 70, "hvac_action": "heating"}
+    J.save_sample(ctx.conn, NOW, doc, "SHADOW", 90, [])
+    r = H.room_report(ctx.conn, NOW, "24h", "thermostat", ctx.settings, "heat")
+    assert r["measured"] == 0 and r["stale"] == 1
+    assert r["mean"] is None and r["comfort_pct"] is None and r["heat_min"] is None
+
+
+@pytest.mark.brd("NFR-SEC-1")
+def test_room_reports_preserve_room_access_and_are_read_only(tmp_path: Path) -> None:
+    ctx, _, client = make(tmp_path)
+    ctx.conn.execute("UPDATE users SET room='bedroom_1' WHERE username='jordan'")
+    J.save_sample(ctx.conn, NOW, _room_doc(70), "SHADOW", 90, [])
+    assert client.get("/room", follow_redirects=False).status_code == 303
+    login(client, "jordan")
+    before = ctx.conn.total_changes
+    for rng in H.RANGES:
+        response = client.get(f"/room?range={rng}")
+        assert response.status_code == 200 and 'data-testid="room-mean">70°F' in response.text
+        assert 'href="room?room=study' not in response.text and "99°F" not in response.text
+    assert ctx.conn.total_changes == before
+    assert client.get("/room?room=study&range=7d").status_code == 403
+    assert client.get("/room?range=invalid").status_code == 422
+    login(client, "ann")
+    assert client.get("/room?room=missing").status_code == 404
+    assert client.get("/room?room=study&range=7d").status_code == 200
+    assert "No room is assigned" in client.get("/room").text

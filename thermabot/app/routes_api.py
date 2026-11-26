@@ -11,7 +11,7 @@ import sqlite3
 import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
 import httpx
@@ -25,7 +25,7 @@ from thermabot.adapters import db
 from thermabot.app import auth as A
 from thermabot.app.auth import COOKIE, Auth, LoginError, Principal, require
 from thermabot.app.sse import Broker, frame, stream
-from thermabot.config import Settings
+from thermabot.config import BlockStart, Settings
 from thermabot.core import statemachine as sm
 from thermabot.core.openings import OpeningFinding
 from thermabot.core.overrides import (
@@ -1275,6 +1275,201 @@ async def settings_put(body: dict[str, Any], request: Request, c: CtxD, p: Comfo
         raise HTTPException(422, errs) from e
     async with c.kill_lock:
         return _save_settings(new, request, c, p)
+
+
+class PreferencesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ideal_f: float = Field(ge=60, le=80, allow_inf_nan=False)
+    priority: Literal["comfort", "balanced", "efficiency"]
+    home_rooms: list[str] = Field(min_length=1)
+    sleep_rooms: list[str] = Field(min_length=1)
+    confirmed_mappings: Literal[True]
+    fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class PreferencesApplyIn(PreferencesIn):
+    preview_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+def _preference_proposal(c: Ctx, body: PreferencesIn) -> tuple[Settings, Settings]:
+    from thermabot.app.room_insights import fingerprint
+    from thermabot.core.preferences import propose
+
+    old = load_settings(c)
+    if body.fingerprint != fingerprint(old):
+        raise HTTPException(409, "Settings changed; reload and preview your preferences again.")
+    try:
+        new = propose(old, body.ideal_f, body.priority, body.home_rooms, body.sleep_rooms)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return old, new
+
+
+@router.post("/api/settings/preferences/preview")
+async def preferences_preview(body: PreferencesIn, c: CtxD, _: Comfort) -> dict[str, Any]:
+    from thermabot.app.room_insights import fingerprint
+    from thermabot.core.comfort import hold_setpoints
+    from thermabot.core.preferences import selected_rooms
+
+    old, new = _preference_proposal(c, body)
+    return {
+        "changed": old != new,
+        "preview_fingerprint": fingerprint(new),
+        "priority": body.priority,
+        "ideal_f": new.insights.ideal_temp_f,
+        "tolerance_f": new.insights.tolerance_f,
+        "home": new.seasonal_control.home,
+        "sleep": new.seasonal_control.sleep,
+        "automatic": hold_setpoints(new.seasonal_control.home, new.writes.deadband_f),
+        "previous": {
+            "weather_aware": old.seasonal_control.enabled,
+            "home": old.seasonal_control.home if old.seasonal_control.enabled else None,
+            "sleep": old.seasonal_control.sleep if old.seasonal_control.enabled else None,
+            "heat_home": old.bands.heat.home,
+            "cool_home": old.bands.cool.home,
+            "heat_sleep": old.bands.heat.sleep,
+            "cool_sleep": old.bands.cool.sleep,
+            "home_rooms": selected_rooms(old, "home"),
+            "sleep_rooms": selected_rooms(old, "sleep"),
+        },
+        "home_rooms": selected_rooms(new, "home"),
+        "sleep_rooms": selected_rooms(new, "sleep"),
+        "note": "Enables weather-aware Home/Sleep reference bands and equal influence for the "
+        "selected rooms. Existing schedule, Away settings, room tolerances, safety limits and "
+        "operation mode are preserved. No guaranteed savings estimate for this preference "
+        "change; cost and tariff tools remain simulated and approval-based.",
+    }
+
+
+@router.post("/api/settings/preferences/apply", response_model=OkOut)
+async def preferences_apply(
+    body: PreferencesApplyIn, request: Request, c: CtxD, p: Comfort
+) -> OkOut:
+    from thermabot.app.room_insights import fingerprint
+
+    async with c.kill_lock:
+        _, new = _preference_proposal(c, body)
+        if body.preview_fingerprint != fingerprint(new):
+            raise HTTPException(409, "Preferences changed after preview; preview them again.")
+        _save_settings(new, request, c, p)
+    return OkOut(
+        detail="Preferences saved; replanning. Operation mode and safety remain unchanged."
+    )
+
+
+def room_access(c: Ctx, p: Principal, room: str) -> Settings:
+    if room != p.room and not p.can("nudge_any"):
+        raise HTTPException(403, "members can only view their own room")
+    settings = load_settings(c)
+    if room not in settings.rooms:
+        raise HTTPException(404, "unknown room")
+    return settings
+
+
+@router.get("/api/rooms/{room}/insights")
+async def room_insights_get(room: str, c: CtxD, p: View) -> dict[str, Any]:
+    from thermabot.app.room_insights import report
+
+    return report(c.conn, c.clock(), room, room_access(c, p, room))
+
+
+class RoomWhatIfIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario: Literal["setback", "tariff"] = "setback"
+    setback_f: float = Field(default=2, ge=0, le=4, allow_inf_nan=False)
+    hours: int = Field(default=4, ge=1, le=8)
+
+
+@router.post("/api/rooms/{room}/what-if")
+async def room_what_if(room: str, body: RoomWhatIfIn, c: CtxD, p: View) -> dict[str, Any]:
+    from thermabot.app.room_insights import what_if
+
+    return what_if(
+        c.conn,
+        c.clock(),
+        room,
+        room_access(c, p, room),
+        c.snapshot,
+        c.forecast,
+        body.scenario,
+        body.setback_f,
+        body.hours,
+    )
+
+
+class ScheduleApprovalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    suggestion_id: str
+    fingerprint: str = Field(min_length=64, max_length=64)
+
+
+@router.post("/api/rooms/{room}/schedule-approval", response_model=OkOut)
+async def room_schedule_approval(
+    room: str, body: ScheduleApprovalIn, request: Request, c: CtxD, p: Comfort
+) -> OkOut:
+    from thermabot.app.room_insights import fingerprint, report
+
+    async with c.kill_lock:
+        old = room_access(c, p, room)
+        if body.fingerprint != fingerprint(old):
+            raise HTTPException(409, "Settings changed; reload and review the suggestion again.")
+        suggestions = report(c.conn, c.clock(), room, old)["suggestions"]
+        candidate = next((s for s in suggestions if s["id"] == body.suggestion_id), None)
+        if candidate is None:
+            raise HTTPException(409, "Suggestion no longer has sufficient evidence.")
+        kind, hour = candidate["kind"], candidate["hour"]
+        blocks = list(getattr(old.schedule, kind))
+        start, end = f"{hour:02}:00", f"{hour + 1:02}:00"
+        previous = [b for b in blocks if b.start <= end]
+        restore = (previous[-1] if previous else blocks[-1]).block
+        updated = [b for b in blocks if b.start != start]
+        updated.append(BlockStart(start=start, block="away"))
+        if not any(b.start == end for b in blocks):
+            updated.append(BlockStart(start=end, block=restore))
+        schedule = old.schedule.model_copy(update={kind: sorted(updated, key=lambda b: b.start)})
+        new = Settings.model_validate({**old.model_dump(), "schedule": schedule.model_dump()})
+        _commit_settings(
+            c,
+            old,
+            new,
+            request,
+            p,
+            "room_schedule_approve",
+            room=room,
+            suggestion=body.suggestion_id,
+        )
+    return OkOut(detail="Approved schedule window saved; replanning. Control mode is unchanged.")
+
+
+class RoomExperimentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9 _-]+$")
+    change_day: date
+
+
+@router.post("/api/rooms/{room}/experiments", response_model=OkOut)
+async def room_experiment_create(
+    room: str, body: RoomExperimentIn, request: Request, c: CtxD, p: Comfort
+) -> OkOut:
+    settings = room_access(c, p, room)
+    today = c.clock().astimezone(active_zone()).date()
+    if not today - timedelta(days=14) <= body.change_day <= today or not body.name.strip():
+        raise HTTPException(422, "Use a nonblank name and a change date within the last 14 days.")
+    with c.conn:
+        c.conn.execute("BEGIN")
+        c.conn.execute(
+            "INSERT INTO room_experiments (room,name,change_day,created_at,settings_json)"
+            " VALUES (?,?,?,?,?)",
+            (
+                room,
+                body.name.strip(),
+                body.change_day.isoformat(),
+                _iso(c.clock()),
+                settings.model_dump_json(),
+            ),
+        )
+        c.audit(p, "room_experiment_create", request, room=room, name=body.name.strip())
+    return OkOut(detail="Experiment recorded; read-only before/after evidence will accumulate.")
 
 
 # ---- model / alerts (Owner) ------------------------------------------------------------

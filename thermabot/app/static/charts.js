@@ -230,6 +230,56 @@
     load(card.dataset.range || '24h');
   }
 
+  function room(el) {
+    const d = json(el.dataset.src);
+    const units = d.units || 'F';
+    const temp = toUnits(d.temp, units), indoor = toUnits(d.indoor, units);
+    const [ideal, low, high] = toUnits([d.ideal, d.ideal - d.tolerance, d.ideal + d.tolerance], units);
+    el.dataset.points = d.t.length;
+    el.dataset.measured = d.temp.filter((v) => v != null).length;
+    el.dataset.ideal = ideal;
+    if (!Number(el.dataset.measured)) {
+      state(el, 'empty', 'No fresh room measurements in this range. See the table for gaps and data quality.');
+      el.dataset.ready = '1';
+      return;
+    }
+    mount(el, (w, p) => {
+      const series = [{},
+        { label: 'Room (measured)', stroke: p.accent, width: 2, spanGaps: false, points: { show: true, size: 5 } },
+        { label: 'Thermostat (measured)', stroke: p.textMuted, width: 1.5, spanGaps: false, points: { show: true, size: 4 } },
+        { label: 'Ideal reference', stroke: p.good, width: 1.5, dash: [6, 4], points: { show: false } }];
+      el.dataset.series = series.slice(1).map((s) => s.label).join(',');
+      return [{
+        series, axes: axes(p, '°' + units), legend: { show: false },
+        scales: {
+          x: { time: true, range: [d.start, d.end] },
+          y: { range: (u, mn, mx) => {
+            const min = Math.min(mn, low), max = Math.max(mx, high);
+            const pad = Math.max(0.5, (max - min) * 0.1);
+            return [min - pad, max + pad];
+          } },
+        },
+        plugins: [{
+          hooks: { drawAxes: (u) => {
+            const y0 = u.valToPos(high, 'y', true), y1 = u.valToPos(low, 'y', true);
+            u.ctx.save();
+            u.ctx.fillStyle = p.band;
+            u.ctx.fillRect(u.bbox.left, y0, u.bbox.width, y1 - y0);
+            u.ctx.restore();
+          } },
+        }, tooltip((u, i) => ({
+          title: fmtT(d.t[i], true) + ' (interval mean)',
+          items: [
+            { label: 'Room', color: p.accent, value: deg(temp[i], units) },
+            { label: 'Thermostat', color: p.textMuted, value: deg(indoor[i], units) },
+            { label: 'Ideal reference', color: p.good, value: deg(ideal, units) },
+          ],
+        }))],
+      }, [d.t, temp, indoor, d.t.map(() => ideal)]];
+    });
+    el.dataset.state = 'ready';
+  }
+
   // ---- P2 plan: predicted temperature, setpoints, rooms (estimated rooms dashed) -----------
   function plan(el) {
     const d = json(el.dataset.src);
@@ -354,7 +404,7 @@
     const pad = span < 120 ? 15 * 60 : Math.max(span * 0.04, 60);
     return [min - pad, max + pad];
   }
-  const kinds = { plan, daily, forecast, efficiency, savings };
+  const kinds = { room, plan, daily, forecast, efficiency, savings };
   function init() {
     if (!window.uPlot) return;
     for (const el of document.querySelectorAll('[data-chart]')) {

@@ -78,13 +78,13 @@ def test_migration_004_on_v3_db_forward_only(tmp_path: Path) -> None:
     raw.commit()
     raw.close()
     conn = db.open_db(p, now=NOW)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     assert counts(conn) == (1, 1, 0, 0)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(efficiency_daily)")]
     assert cols[:6] == ["day", "mean_out_f", "hdd", "cdd", "heat_min", "cool_min"]
     conn.close()
     conn = db.open_db(p, now=NOW)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 and counts(conn) == (1, 1, 0, 0)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5 and counts(conn) == (1, 1, 0, 0)
 
 
 @pytest.mark.brd("FR-EFF-5")

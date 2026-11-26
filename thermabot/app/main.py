@@ -309,6 +309,7 @@ class Runtime:
                 [
                     *J.extra_entities(s),
                     *(r.temp for k, r in s.rooms.items() if k != "thermostat"),
+                    *(eid for r in s.rooms.values() for eid in (r.humidity, r.energy) if eid),
                     *(s.openings.sensors if s.openings.enabled else []),
                 ]
             )

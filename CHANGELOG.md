@@ -5,6 +5,36 @@ stable releases and do not satisfy any documented live-soak or owner-review gate
 notes are retained here, but historical source tags and release assets are not copied from the
 private development repository.
 
+## 0.7.0-rc.1 - 2026-11-26 (prerelease)
+
+Application version `0.7.0`; add-on and Compose version `0.7.0-rc.1`. This is a prerelease,
+not stable 0.7.0. Images publish from `main` and the matching version tag after CI passes.
+Wait for successful publication and anonymous image-resolution checks before installing.
+The live SHADOW soak and Owner-review gates remain required; updating never enables Control.
+
+- Add room insights, fresh-measurement temperature tables and comfort indicators for
+  24-hour, 7-day and 30-day periods, with explicit coverage and missing/stale data.
+- Add the configurable 73 F ideal reference and ten research-backed room tools: sensor
+  diagnostics, weather-adjusted performance alerts, setback simulations, metered energy/cost,
+  tariff comparisons, HVAC/auxiliary diagnostics, humidity comfort, approved schedule
+  suggestions, persisted improvement experiments and weekly ranked actions.
+- Reorganize rooms into summary, Overview, Temperatures, Efficiency and Tools views, with
+  always-accessible nudges, linked setup readiness, a temperature/reference-band chart and
+  baseline/proposed simulation comparisons. Preserve room access, CSRF and the sole
+  controller write path; central HVAC observations are not assigned to individual rooms.
+- Make primary Settings a preview-first ideal-temperature, comfort/efficiency slider and
+  important-room flow. Explicit application enables reviewed weather-aware Home/Sleep
+  bands and equal room influence. Custom settings are preserved until approval; technical
+  bands, scoring, tariff and model options move to Advanced. Safety, operating mode,
+  schedule, Away settings, passive equipment and unrelated sensor mappings stay unchanged.
+- Migration 005 adds experiment metadata without replacing existing settings or samples.
+- Update the customer UAT playbook and require current-candidate acceptance before GitHub
+  shipping. All 38 customer/lab cases and 43 targeted room regressions pass, including
+  genuine model fitting, qualified simulated history, explicit schedule approval and
+  offline-copy experiment retention. The earlier full unit and integration/E2E runs pass
+  611 and 748 tests respectively; core coverage is 94.76%. See the [UAT report](docs/uat-0.7.0.md)
+  for source identities, overlapping counts and external gates that remain unrun.
+
 ## 0.6.8-rc.12 - 2026-11-26 (prerelease)
 
 The Home Assistant add-on catalog version is `0.6.8-rc.12`, published from `main` only

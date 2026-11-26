@@ -2,6 +2,11 @@
 {% block title %}{{ task_title }}{% endblock %}
 {% block content %}
 <div class="page-head"><h2>{{ task_title }}</h2></div>
+{% if task == 'advanced' %}
+<p class="meta">Technical and custom settings. Use <a href="{{ up }}settings">Simple comfort preferences</a>
+  for the ideal temperature, comfort–efficiency slider and important rooms. Custom edits here are preserved
+  until you explicitly review and apply a Simple recommendation.</p>
+{% endif %}
 {% if p.can('edit_safety') and task == 'comfort' %}
 <p><a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>
 {% endif %}
@@ -9,7 +14,7 @@
 <p class="meta">Setup never starts Active control. Saving here does not change the run mode.</p>
 {% if p.can('edit_safety') %}<p><a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>{% endif %}
 {% endif %}
-{% if task == 'comfort' %}
+{% if task in ('comfort', 'advanced') %}
 <section class="card" data-testid="bands-summary">
   {% if settings.seasonal_control.enabled %}
   <p data-testid="seasonal-bands-summary">Weather-aware comfort:

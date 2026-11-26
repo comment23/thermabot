@@ -46,6 +46,7 @@ TITLES = {
     "planner": "Planner",
     "weather": "Weather",
     "metrics": "Metrics",
+    "insights": "Room insights and energy",
     "alerts": "Alerts",
     "summary": "Weekly summary",
 }
@@ -54,20 +55,25 @@ ORDER = list(TITLES)
 
 # Task pages. Schedule has its own editor and is not a generic field list.
 TASKS: dict[str, tuple[str, ...]] = {
-    "comfort": (
-        "bands",
-        "display",
-        "season",
-        "seasonal_control",
-        "nudge",
-        "override",
-        "comfort",
-        "fan",
-    ),
+    "comfort": ("display",),
     "safety": ("stop_handoff", "safety", "off", "writes"),
     "ha": ("thermostat", "sensors", "weather"),
     "people": ("presence", "aux_heat"),
-    "advanced": ("planner", "metrics", "alerts", "summary"),
+    "advanced": (
+        "bands",
+        "display",
+        "seasonal_control",
+        "season",
+        "comfort",
+        "nudge",
+        "override",
+        "fan",
+        "insights",
+        "planner",
+        "metrics",
+        "alerts",
+        "summary",
+    ),
 }
 TASK_TITLES = {
     "comfort": "Comfort",
@@ -91,6 +97,7 @@ ABS_TEMP = {
     "stop_handoff.heat_f",
     "stop_handoff.cool_f",
     "metrics.hdd_base_f",
+    "insights.ideal_temp_f",
 }
 
 

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from functools import cache
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -22,12 +22,12 @@ from fastapi.templating import Jinja2Templates
 
 from thermabot import __version__
 from thermabot.adapters import db
-from thermabot.app import forms, timeline
+from thermabot.app import forms, history, room_insights, timeline
 from thermabot.app import routes_api as api
 from thermabot.app.auth import COOKIE, FIRST_RUN_COOKIE, FIRST_RUN_TTL, MIN_PW, Principal, require
 from thermabot.app.present import action_sentence
 from thermabot.app.routes_api import Ctx, ctx_of, load_settings
-from thermabot.app.units import Units, format_temp
+from thermabot.app.units import Units, f_to_c, format_temp
 from thermabot.core import explain as explain_plan
 from thermabot.core import statemachine as sm
 from thermabot.core.explain import GUARD_LABELS, coldest_room, infer_factors
@@ -35,6 +35,7 @@ from thermabot.core.guards import evaluate
 from thermabot.core.overrides import nudge_active, nudges_today
 from thermabot.core.schedule import active_zone, block_at
 from thermabot.core.types import PlanStep, RoomReading
+from thermabot.core.weather import forecast_season
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
@@ -647,8 +648,26 @@ def _settings_ctx(c: Ctx, p: Principal, task: str) -> dict[str, Any]:
 async def settings_page(
     request: Request, c: CtxD, p: Annotated[Principal, Depends(page("edit_comfort"))]
 ) -> Response:
-    """Comfort is the settings home. Other tasks are linked from here."""
-    return render(request, c, p, "settings.html", **_settings_ctx(c, p, "comfort"))
+    """Simple preferences are drafts until previewed and explicitly applied."""
+    from thermabot.core.preferences import FLEXIBILITY, saved_priority, selected_rooms
+
+    s = load_settings(c)
+    return render(
+        request,
+        c,
+        p,
+        "simple_settings.html",
+        **_settings_ctx(c, p, "comfort"),
+        preference_fingerprint=room_insights.fingerprint(s),
+        priority=saved_priority(s),
+        flexibility=FLEXIBILITY,
+        ideal_display=f_to_c(s.insights.ideal_temp_f)
+        if s.display.units == "C"
+        else s.insights.ideal_temp_f,
+        home_rooms=selected_rooms(s, "home"),
+        sleep_rooms=selected_rooms(s, "sleep"),
+        model_label=_model_label(c),
+    )
 
 
 @router.get("/settings/{task}", response_class=HTMLResponse)
@@ -661,6 +680,8 @@ async def settings_task(
         kw["task"] = "schedule"
         kw["task_title"] = "Schedule"
         return render(request, c, p, "schedule.html", **kw, schedule=s.schedule, bands=s.bands)
+    if task == "comfort":
+        return await settings_page(request, c, p)
     if task not in forms.TASKS:
         raise HTTPException(404, "unknown settings page")
     if task == "safety" and not p.can("edit_safety"):
@@ -819,6 +840,8 @@ async def room_page(
     c: CtxD,
     p: Annotated[Principal, Depends(page("view"))],
     room: str | None = None,
+    range: Literal["24h", "7d", "30d"] = "24h",
+    view: Literal["overview", "temperatures", "efficiency", "tools"] = "overview",
 ) -> Response:
     """P8: own room (members) or any room (nudge_any). Nudges go through POST /api/nudge."""
     if room is not None and room != p.room and not p.can("nudge_any"):
@@ -831,6 +854,28 @@ async def room_page(
     active = [(i, n) for i, n in nudges if n.room == room and nudge_active(n, now)]
     used = nudges_today([n for _, n in nudges], p.user_id or 0, now)
     reading = c.snapshot.rooms.get(room) if c.snapshot and room else None
+    settings = load_settings(c)
+    season = forecast_season(c.forecast, now, settings.season, settings.weather) or "shoulder"
+    report = history.room_report(c.conn, now, range, room, settings, season) if room else None
+    insights = room_insights.report(c.conn, now, room, settings) if room else None
+    readiness = (
+        room_insights.setup_readiness(c.conn, now, room, settings, c.snapshot, c.forecast, insights)
+        if room and insights
+        else None
+    )
+    room_chart = None
+    if report is not None and view == "temperatures":
+        rows = report["rows"]
+        room_chart = {
+            "t": [(r["start"].timestamp() + r["end"].timestamp()) / 2 for r in rows],
+            "temp": [r["temp"] for r in rows],
+            "indoor": [r.get("indoor") for r in rows],
+            "start": rows[0]["start"].timestamp(),
+            "end": rows[-1]["end"].timestamp(),
+            "ideal": settings.insights.ideal_temp_f,
+            "tolerance": settings.insights.tolerance_f,
+            "units": settings.display.units,
+        }
     return render(
         request,
         c,
@@ -843,6 +888,16 @@ async def room_page(
         cfg=c.settings.nudge,
         can_nudge=p.can("nudge_own"),
         rooms=sorted(c.settings.rooms) if p.can("nudge_any") else [],
+        report=report,
+        season=season,
+        floor=settings.rooms[room].floor if room else "",
+        insights=insights,
+        setback=settings.insights.setback_f,
+        room_view=view,
+        range_label={"24h": "24 h", "7d": "7 days", "30d": "30 days"}[range],
+        readiness=readiness,
+        room_chart=room_chart,
+        charts=room_chart is not None,
     )
 
 

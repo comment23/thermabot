@@ -167,12 +167,46 @@ save with no edits changes nothing.
 
 ## Settings page
 
-One form per section, generated from the `Settings` model. A save goes through `PUT /api/settings`
+### Simple settings
+
+The primary Comfort page starts with three choices: your ideal temperature (73 F by default),
+a three-position **Comfort / Balanced / Efficiency** slider, and important rooms for Home
+(daytime) and Sleep (nighttime). Confirm the thermostat and selected temperature-sensor
+assignments before previewing. The sensor/equipment wizard still requires an Owner.
+
+- Comfort recommends ideal +/- 1 F, Balanced +/- 2 F, and Efficiency +/- 3 F. These are
+  Home/Sleep reference ranges, not hard temperature guarantees or estimated savings.
+  Existing room tolerances, scoring and safety guards remain in force.
+- **Preview recommendation** changes no settings. It shows old/new reference ranges,
+  selected room influence, and any widening required by the thermostat's automatic-mode
+  deadband. Missing mappings and conflicts with saved safety limits are rejected explicitly.
+- **Apply reviewed preferences** enables weather-aware shared Home/Sleep bands, updates the
+  ideal analysis reference/tolerance and gives selected rooms equal influence. The existing
+  Away ranges/weights, schedule, thermostat, sensors, safety, write limits and operating mode
+  are preserved. Nonselected rooms keep their measurements and safety checks.
+- Custom configurations remain untouched until application; the starting Balanced suggestion
+  is not automatically saved. Later custom edits are shown as Custom, not silently reset.
+  A changed settings fingerprint or edited preview requires a new review.
+- Applying preferences does not start Active control. If already Active, future guarded
+  decisions use the new ranges. The existing planner/fallback handles weather, occupancy and
+  model confidence; schedule suggestions remain approval-based. Tariff tools do not become
+  an automatic actuator policy.
+- Optional humidity, metering, tariff and technical tuning stay in Home & rooms / Advanced.
+  Simple preferences use authenticated, CSRF-protected
+  `POST /api/settings/preferences/preview` and `POST /api/settings/preferences/apply`
+  (Owner/Admin). Celsius input follows the existing conversion and untouched-value rules.
+
+### Advanced settings
+
+Custom bands, display units, scoring, nudges, overrides, fan/model tuning, insights/tariffs,
+metrics and reporting are available in **Advanced**. Forms are generated from the `Settings`
+model. A save goes through `PUT /api/settings`
 and the same pydantic validation, and errors are shown next to the field. The `thermostat`,
 `safety`, `off`, and `stop_handoff` sections need an Owner. Owners also get a read-only JSON view
 under *Advanced*.
 
-**Weather-aware comfort** is opt-in under Settings. Enable it and set both the home and sleep
+**Weather-aware comfort** is opt-in through a reviewed Simple recommendation or Advanced.
+Enable it and set both the home and sleep
 ranges to use those ranges in every season. Review the [weather-aware behavior and safety
 limitations](weather.md#weather-aware-comfort) before enabling it. An older configuration export
 without this section can still be imported; the new policy will be disabled in the imported
