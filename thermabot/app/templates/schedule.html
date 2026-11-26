@@ -3,7 +3,6 @@
 {% block content %}
 <div class="page-head"><h2>Schedule</h2>
   <p class="meta">Weekday and weekend blocks. Saving uses the same settings update as the rest of the app.</p></div>
-{% include "partials/settings_nav.html" %}
 <form id="settings-form" data-settings-form data-testid="settings-form" data-schedule-editor data-units="{{ units }}"
       data-settings='{{ settings_json }}' novalidate>
   <div class="week" data-testid="schedule-editor" role="list" aria-label="Week">

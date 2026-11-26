@@ -445,7 +445,12 @@ dl.review dd { margin: 0; overflow-wrap: anywhere; }
 }
 
 /* ---- status bar, pills, sheets, timeline ------------------------------------------------ */
-.status-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.status-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; width: 100%; padding: 8px 0; }
+.header-identity, .header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.header-actions { margin-left: auto; }
+header.tb #kill-open { min-height: 44px; height: auto; margin: 0; padding: 10px 18px;
+  border-radius: var(--tb-radius-sm); font-size: 14px; line-height: 22px; font-weight: 700; }
 .mode-pill, .health-chip, .tag, .action-pill, .live-tag {
   display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px;
   border-radius: var(--tb-radius-pill); border: 1px solid var(--tb-line); background: var(--tb-card);
@@ -469,11 +474,44 @@ h2 { font-size: 22px; }
 .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
   color: var(--tb-text-muted); margin: 0 0 8px; }
 .meta { font-size: 12px; color: var(--tb-text-muted); }
-.account-menu { position: relative; }
-.account-menu > summary { min-height: var(--tb-tap); display: flex; align-items: center; cursor: pointer; }
-.account-menu > div { position: absolute; right: 0; z-index: 30; background: var(--tb-card);
-  border: 1px solid var(--tb-line); border-radius: 12px; padding: 8px; min-width: 12rem; }
-.account-menu a, .account-menu button { display: flex; align-items: center; min-height: var(--tb-tap); }
+.header-menu { position: relative; margin: 0; padding: 0; border: 0; }
+.header-menu > summary { min-height: var(--tb-tap); display: flex; align-items: center;
+  justify-content: center; gap: 8px; margin: 0; padding: 8px 12px; cursor: pointer;
+  color: var(--tb-text); background: transparent; border: 1px solid var(--tb-line);
+  border-radius: var(--tb-radius-sm); font-size: 12px; font-weight: 600; list-style: none; }
+.header-menu > summary::after, .header-menu > summary::-webkit-details-marker { display: none; }
+.header-menu > summary:hover, .header-menu[open] > summary { background: var(--tb-card); }
+.header-menu > div { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 16rem;
+  max-width: calc(100vw - 32px); padding: 16px; background: var(--tb-card);
+  border: 1px solid var(--tb-line); border-radius: var(--tb-radius-sm); box-shadow: var(--tb-shadow); }
+.header-menu a, .header-menu button { display: flex; align-items: center; min-height: var(--tb-tap); margin: 0; }
+.header-menu .health-chip, .header-menu .live-tag { border: 0; background: transparent; padding: 4px 0; }
+.system-menu:has([data-health]:not([data-health="ok"])),
+.system-menu:has([data-testid=sensors-pill]), .system-menu[data-live="poll"] { color: var(--tb-warn-fg); }
+.system-menu:has([data-health]:not([data-health="ok"])) > summary,
+.system-menu:has([data-testid=sensors-pill]) > summary,
+.system-menu[data-live="poll"] > summary { color: var(--tb-warn-fg); background: var(--tb-warn-bg); border-color: var(--tb-warn-line); }
+.account-avatar { display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; background: var(--tb-card); color: var(--tb-accent); }
+.presence-person { padding: 16px; margin-bottom: 12px; border: 1px solid var(--tb-line);
+  border-radius: var(--tb-radius-sm); box-shadow: none; }
+.people-editor button { min-height: var(--tb-tap); padding: 8px 12px; border-radius: var(--tb-radius-sm);
+  font-size: 14px; line-height: 24px; }
+.presence-person .card-head { justify-content: flex-end; }
+.presence-person .review-check { margin-right: auto; }
+.presence-person input:not([type=checkbox]) { height: 44px; padding-block: 8px; margin-bottom: 0; font-size: 14px; }
+.presence-person label { min-width: 0; }
+@media (max-width: 600px) {
+  header.tb > .status-bar { gap: 8px; flex-wrap: nowrap; padding: 0; }
+  .header-identity { gap: 6px; flex-wrap: nowrap; }
+  header.tb .brand-name, .account-name, .system-status-label { position: absolute; width: 1px;
+    height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .header-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .header-menu > summary { width: 44px; padding: 8px; }
+  .system-menu > div { right: -50px; }
+  .mode-pill { padding-inline: 8px; white-space: nowrap; }
+}
 dialog.sheet { border: 0; padding: 0; width: min(32rem, 100%); max-height: 90dvh;
   margin: auto auto 0; border-radius: 20px 20px 0 0; background: var(--tb-card); color: var(--tb-text); }
 dialog.sheet article { padding: 12px 16px 24px; }

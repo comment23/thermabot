@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thermabot customer UAT lab</title>
+  <link rel="stylesheet" href="static/vendor/pico.min.css">
+  <style>
+    main { max-width: 900px; margin: auto; padding: 1rem; }
+    .warning { border-left: 4px solid #cc8500; padding: 1rem; }
+    pre { max-height: 30rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    button { min-height: 44px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Customer UAT lab</h1>
+  <p class="warning"><strong>Simulated devices only.</strong> This is not production Home Assistant.
+    Control/ACTIVE and climate writes are blocked. Use Watch and Stop; this lab cannot certify a live soak.</p>
+  <p><a href="./" target="_blank" rel="noopener">Open Thermabot in another tab</a></p>
+  <p>A configured demo starts stopped. Test accounts: <strong>alex</strong> (Owner),
+    <strong>ann</strong> (Admin), <strong>jordan</strong> (Member). Demo password:
+    <code>correct horse</code>. A fresh lab has no accounts: create the initial Owner normally.</p>
+  <form id="scenario-form">
+    <label for="scenario">Simulated Home Assistant scenario</label>
+    <select id="scenario">
+      <option value="healthy">Healthy: fresh Fahrenheit temperatures</option>
+      <option value="celsius">Celsius: study at 20 C / 68 F</option>
+      <option value="stale-room">Stale study: last report two hours ago</option>
+      <option value="missing-room">Unavailable study sensor</option>
+      <option value="away">Away: normal presence grace periods apply</option>
+      <option value="ha-outage">Home Assistant outage</option>
+    </select>
+    <button type="submit">Apply scenario and sample now</button>
+  </form>
+  <p id="result" role="status" aria-live="polite">Loading evidence...</p>
+  <h2>Live runtime evidence</h2>
+  <p>Device reports stay fresh on each normal 60-second tick. Faults persist until you choose
+    Healthy. Saved settings and accounts survive restart; use a new data directory to reset.</p>
+  <pre id="evidence" tabindex="0"></pre>
+  <h2>Customer checklist</h2>
+  <ol>
+    <li>Fresh lab: create Owner, complete setup, restart, then check room readings.</li>
+    <li>Settings: add/remove presence people, save and reload.</li>
+    <li>Click Backup, Health, Account and Users; Settings tabs must stay visible.</li>
+    <li>Watch/Stop: no thermostat service calls; review Control blockers without enabling it.</li>
+    <li>Apply Celsius, stale, unavailable and outage scenarios; confirm the dashboard recovers.</li>
+    <li>Sign in as Member; privileged Settings and user management must be inaccessible.</li>
+  </ol>
+</main>
+<script>
+  const result = document.getElementById('result');
+  const evidence = document.getElementById('evidence');
+  async function update(options) {
+    try {
+      const response = await fetch(options ? 'uat/api/scenario' : 'uat/api/status', options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      evidence.textContent = JSON.stringify(data, null, 2);
+      const safe = data.run_mode === 'shadow' && !data.climate_service_calls.length &&
+        !data.blocked_climate_requests.length;
+      result.textContent = safe
+        ? `${data.scenario}: ${data.state}. Zero climate writes. ${data.sample_count} historical samples.`
+        : 'SAFETY FAILURE: inspect the evidence. Stop this lab and report the failure.';
+    } catch (error) {
+      result.textContent = `Harness error: ${error.message}`;
+    }
+  }
+  document.getElementById('scenario-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button');
+    button.disabled = true;
+    await update({
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Thermabot-UAT': '1'},
+      body: JSON.stringify({name: document.getElementById('scenario').value})
+    });
+    button.disabled = false;
+  });
+  update();
+  setInterval(() => update(), 5000);
+</script>
+</body>
+</html>

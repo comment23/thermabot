@@ -18,3 +18,4 @@ qa-report.md
 junit-*.xml
 .coverage
 coverage.xml
+.uat-*/

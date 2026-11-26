@@ -68,7 +68,7 @@ environment. Saving never changes the run mode or starts Active control.</small>
     <h3>4. Presence</h3>
     <p><small>Tick the people or trackers that count for home/away and give each a short name.
       Nobody ticked = the house always counts as occupied.</small></p>
-    <div data-testid="people-list"></div>
+    {% include "partials/people_editor.html" %}
   </section>
 
   <section data-step="5" data-testid="step-comfort" hidden>
@@ -124,5 +124,6 @@ environment. Saving never changes the run mode or starts Active control.</small>
 </div>
 <script src="{{ asset('weather.js') }}"></script>
 <script src="{{ asset('home_editor.js') }}"></script>
+<script src="{{ asset('people_editor.js') }}"></script>
 <script src="{{ asset('setup.js') }}"></script>
 {% endblock %}

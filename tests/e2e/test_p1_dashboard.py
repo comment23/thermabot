@@ -61,6 +61,47 @@ def test_dashboard_shows_live_state(page: Page, srv: Srv) -> None:
     assert_page_healthy(page, srv)
 
 
+@pytest.mark.brd("FR-UI-2")
+@pytest.mark.parametrize("polling", [False, True])
+def test_room_temperatures_refresh_after_new_sensor_readings(
+    page: Page, srv: Srv, polling: bool
+) -> None:
+    if polling:
+        page.route("**/events", lambda route: route.abort())
+        page.clock.install()
+    login(page, srv, "alex")
+    expect(page.locator("html")).to_have_attribute("data-live", "poll" if polling else "sse")
+    srv.errors.clear()  # expected aborted SSE connection in the polling case
+    room = page.locator("[data-testid=room-study]")
+    expect(room).to_contain_text("Waiting for reading")
+    srv.ctx.snapshot = Snapshot(
+        t=datetime.now(UTC),
+        thermostat=ThermostatState(hvac_mode="heat", current_temp=71, outdoor_temp=50),
+        rooms={"study": RoomReading(key="study", temp=68, age_min=1)},
+    )
+
+    def refresh() -> None:
+        if polling:
+            page.clock.run_for(31_000)
+        else:
+            srv.ctx.broker.publish("snapshot", {})
+
+    refresh()
+    expect(room.locator(".room-temp")).to_have_text("68°F")
+    expect(page.locator("[data-testid=now]")).to_contain_text("Outdoor 50°F")
+    status = page.request.get(f"{srv.url}/api/status")
+    assert status.ok and status.json()["rooms"][0]["temp"] == 68
+    srv.ctx.snapshot.rooms["study"] = RoomReading(key="study", temp=68, age_min=90, stale=True)
+    refresh()
+    expect(room).to_contain_text("Stale")
+    expect(room.locator(".room-temp")).to_have_count(0)
+    srv.ctx.snapshot = None
+    refresh()
+    expect(room).to_contain_text("Waiting for reading")
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert_page_healthy(page, srv)
+
+
 @pytest.mark.brd("FR-UI-1")
 def test_dashboard_shows_read_only_opening_assessment(page: Page, srv: Srv) -> None:
     srv.ctx.opening_assessment = [

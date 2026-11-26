@@ -23,6 +23,7 @@
   let haOk = false;
   let disc = null;
   let home = null;
+  let people = null;
 
   // ---- units (mirror of thermabot/app/units.py) ----
   const fToC = (f) => Math.round((f - 32) * 5 / 9 * 10) / 10;
@@ -103,7 +104,8 @@
     renderClimate();
     renderSensors();
     if (!home) home = window.tbHomeEditor($('[data-home-editor]'), st, disc);
-    renderPeople();
+    if (!people) people = window.tbPeopleEditor($('[data-people-editor]'), st, disc);
+    else people.load(disc);
     renderHomeContext(h.ok ? h.data : null, h.ok ? '' : tb.detail(h));
   }
 
@@ -300,45 +302,9 @@
     return bad.join('\n');
   }
 
-  // ---- step 4: people ----
-  function personRow(name, main, fallback, on, c) {
-    return `<div class="person-row" data-testid="person-row">
-      <input type="checkbox" aria-label="use person" ${on ? 'checked' : ''} data-p="on">
-      <input data-p="name" aria-label="display name" value="${esc(name)}" placeholder="name">
-      <input type="search" list="dl-all" data-p="companion" aria-label="tracker" value="${esc(fallback)}" placeholder="person.… / device_tracker.…">
-      <input type="search" list="dl-all" data-p="life360" aria-label="preferred tracker" value="${esc(main)}" placeholder="preferred tracker (optional)">
-      <small>${c ? esc(conf(c) + ' ' + c.reason) : ''}</small></div>`;
-  }
-  function renderPeople() {
-    const used = new Set();
-    const rows = Object.entries(st.presence.people).map(([n, p]) => {
-      used.add(p.life360); used.add(p.companion);
-      return personRow(n, p.life360 || '', p.companion || '', true, null);
-    });
-    for (const c of disc.suggestions.people) {
-      if (used.has(c.entity_id)) continue;
-      rows.push(personRow(slug(c.entity_id.split('.')[1]), '', c.entity_id, false, c));
-    }
-    $('[data-testid=people-list]').innerHTML = rows.join('') || '<p><small>No person or device_tracker entities found.</small></p>';
-  }
   function readPeople() {
-    const ids = new Set(disc.all.map((e) => e.entity_id));
-    const people = {};
-    const bad = [];
-    for (const row of $$('[data-testid=person-row]')) {
-      if (!$('[data-p=on]', row).checked) continue;
-      const name = slug($('[data-p=name]', row).value);
-      const life360 = $('[data-p=life360]', row).value.trim() || null;
-      const companion = $('[data-p=companion]', row).value.trim() || null;
-      if (!name) { bad.push('every ticked person needs a name'); continue; }
-      if (people[name]) { bad.push(`${name} listed twice`); continue; }
-      if (!life360 && !companion) { bad.push(`${name}: pick a tracker`); continue; }
-      for (const t of [life360, companion]) if (t && !ids.has(t)) bad.push(`${name}: ${t} is not a Home Assistant entity`);
-      if (st.presence.excluded.includes(name)) bad.push(`${name} is in presence.excluded; pick another name`);
-      people[name] = { life360, companion };
-    }
-    st.presence.people = people;
-    return bad.join('\n');
+    people.apply(st);
+    return people.validate(st, true);
   }
 
   // ---- step 5: comfort bands ----

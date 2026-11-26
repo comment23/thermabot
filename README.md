@@ -13,7 +13,11 @@ over convenience.
 | Channel | Version | Status |
 |---|---|---|
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Prerelease | [v0.6.8-rc.11](CHANGELOG.md#068-rc11---2026-11-25-prerelease) | Prerelease; stable release remains blocked on the live soak and Owner review |
+| Add-on prerelease | [0.6.8-rc.12](CHANGELOG.md#068-rc12---2026-11-26-prerelease) | UAT fixes; images publish from `main` after CI; stable release remains blocked on the live soak and Owner review |
+| GitHub prerelease | [v0.6.8-rc.11](CHANGELOG.md#068-rc11---2026-11-25-prerelease) | Latest versioned GitHub release; rc.12 source/image publication does not create a new tag or GitHub release |
+
+Wait for successful `addon-publish` and anonymous image-resolution checks before installing
+the catalog update. The application version remains `0.6.8`; updating does not enable Control.
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -188,6 +192,11 @@ python -m pytest tests/e2e -q
 
 The E2E suite uses a generic test Home Assistant fixture, not a real thermostat. Automated
 tests are not a substitute for the documented SHADOW soak or owner review.
+
+For repeatable customer acceptance sessions, see the [UAT harness](docs/uat.md). It runs the
+full application against simulated Home Assistant, with a first-run mode, fault-scenario
+panel, desktop/mobile customer journeys and local evidence. It cannot enable Control or
+connect to live HVAC.
 
 ## License
 

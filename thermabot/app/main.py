@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from thermabot import __version__
 from thermabot.adapters import db
-from thermabot.adapters.ha_rest import MIRROR_ENTITY, HARest
+from thermabot.adapters.ha_rest import MIRROR_ENTITY, HAError, HARest
 from thermabot.adapters.heartbeat import HeartbeatWebhook
 from thermabot.adapters.influx import Influx, line
 from thermabot.adapters.notify import Notifier, envelope
@@ -57,7 +57,7 @@ from thermabot.core.schedule import (
     season_from_forecast,
 )
 from thermabot.core.summary import LastWeek, render
-from thermabot.core.types import Forecast, HouseState, Plan, Presence, Snapshot, ThermostatState
+from thermabot.core.types import Forecast, HouseState, Plan, Presence, ThermostatState
 from thermabot.core.weather import forecast_season, is_stale
 
 log = logging.getLogger(__name__)
@@ -186,10 +186,9 @@ class Runtime:
         pres = await self.read_presence(now)
         prev_house = None if self.prev_presence is None else self.prev_presence.house
         self.prev_presence = pres
+        states = await self._sensor_states(saved)
         snap = (
-            None
-            if th is None
-            else Snapshot(t=now, thermostat=th, forecast=self.forecast, presence=pres)
+            None if th is None else J.sensor_snapshot(now, saved, th, states, pres, self.forecast)
         )
         self.ctx.snapshot = snap
         self.ctx.broker.publish(
@@ -251,7 +250,7 @@ class Runtime:
                 self.conn, None if th is None else th.hvac_mode, now, s.off.reevaluate_h
             )
         finally:
-            await self.sample(now, th, plan, step)
+            await self.sample(now, th, plan, step, states=states)
 
     # ---- presence (v0.6.2, FR-PRS-1..4) ---------------------------------------------
     async def read_presence(self, now: datetime) -> Presence | None:
@@ -295,31 +294,44 @@ class Runtime:
 
     # ---- 1-minute samples (v0.1.9, FR-MET / D8) -----------------------------------------
     async def _read(self, eid: str) -> dict[str, Any] | None:
+        if eid.startswith("climate."):
+            log.warning("ignoring climate entity in sensor mappings: %s", eid)
+            return None
         try:
-            return await self.ha.get_state(eid)
-        except Exception:  # noqa: BLE001 - best effort; the row is written with nulls
+            return await asyncio.wait_for(self.ha.get_state(eid), SAMPLE_READ_TIMEOUT_S)
+        except (HAError, httpx.HTTPError, TimeoutError) as exc:
+            log.warning("sensor read failed for %s: %s", eid, type(exc).__name__)
             return None
 
+    async def _sensor_states(self, s: Settings) -> dict[str, dict[str, Any] | None]:
+        ids = list(
+            dict.fromkeys(
+                [
+                    *J.extra_entities(s),
+                    *(r.temp for k, r in s.rooms.items() if k != "thermostat"),
+                    *(s.openings.sensors if s.openings.enabled else []),
+                ]
+            )
+        )
+        got = await asyncio.gather(*(self._read(e) for e in ids))
+        return dict(zip(ids, got, strict=True))
+
     async def sample(
-        self, now: datetime, th: ThermostatState | None, plan: Plan | None, step: Any
+        self,
+        now: datetime,
+        th: ThermostatState | None,
+        plan: Plan | None,
+        step: Any,
+        *,
+        states: dict[str, dict[str, Any] | None] | None = None,
     ) -> None:
         """One `samples` row per minute in every bot state (incl. SHADOW). Extra entities are
         read concurrently, best effort and time-bounded; nothing here can break the tick."""
         self.ctx.opening_assessment = []
         try:
             s = load_settings(self.ctx)
-            ids = [
-                *J.extra_entities(s),
-                *(r.temp for k, r in s.rooms.items() if k != "thermostat"),
-                *(s.openings.sensors if s.openings.enabled else []),
-            ]
-            try:
-                got = await asyncio.wait_for(
-                    asyncio.gather(*(self._read(e) for e in ids)), SAMPLE_READ_TIMEOUT_S
-                )
-            except TimeoutError:
-                got = [None] * len(ids)
-            states = dict(zip(ids, got, strict=True))
+            if states is None:
+                states = await self._sensor_states(s)
             opening_states = {eid: states.get(eid) for eid in s.openings.sensors}
             self.ctx.opening_assessment = opening_policy.assess(s.openings, opening_states, now)
             snap = self.ctx.snapshot
@@ -354,6 +366,9 @@ class Runtime:
                 stale,
                 effective_state=eff.state,
                 degraded_reason=eff.degraded_reason,
+            )
+            self.ctx.broker.publish(
+                "snapshot", None if snap is None else snap.model_dump(mode="json")
             )
         except Exception:  # noqa: BLE001 - sampling must never break the tick
             log.exception("sample write failed")

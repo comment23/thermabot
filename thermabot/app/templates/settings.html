@@ -2,7 +2,6 @@
 {% block title %}{{ task_title }}{% endblock %}
 {% block content %}
 <div class="page-head"><h2>{{ task_title }}</h2></div>
-{% include "partials/settings_nav.html" %}
 {% if p.can('edit_safety') and task == 'comfort' %}
 <p><a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Open the setup wizard</a></p>
 {% endif %}
@@ -48,6 +47,7 @@
 {% if task == 'ha' %}
 <script src="{{ up }}{{ asset('weather.js') }}"></script>
 {% endif %}
-{% if task == 'people' %}<script src="{{ up }}{{ asset('home_editor.js') }}"></script>{% endif %}
+{% if task == 'people' %}<script src="{{ up }}{{ asset('home_editor.js') }}"></script>
+<script src="{{ up }}{{ asset('people_editor.js') }}"></script>{% endif %}
 <script src="{{ up }}{{ asset('settings.js') }}"></script>
 {% endblock %}

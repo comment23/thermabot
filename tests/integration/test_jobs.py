@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.house import house_settings, seed_house
+from tests.house import TSTAT, house_settings, seed_house
 from tests.integration.mock_ha import GOOD_TOKEN, MockHA
 from thermabot.adapters import db
 from thermabot.app import jobs as J
@@ -22,7 +22,7 @@ from thermabot.config import OpeningPolicyCfg
 from thermabot.core import planner
 from thermabot.core.schedule import active_zone
 from thermabot.core.thermal import ThermalParams, step
-from thermabot.core.types import Forecast, ForecastPoint, Plan, PlanStep
+from thermabot.core.types import Forecast, ForecastPoint, Plan, PlanStep, Snapshot
 
 NOW = datetime(2026, 10, 5, 18, 0, tzinfo=UTC)  # NWS fixture fetch time
 NWS_FIX = Path(__file__).parent / "fixtures" / "nws"
@@ -125,6 +125,186 @@ def rt_of(
 
 def no_off(p: Plan) -> bool:
     return all(s.hvac_mode != "off" for s in p.steps)
+
+
+@pytest.mark.brd("FR-KIL-1")
+@pytest.mark.parametrize("configured", [False, True])
+async def test_sensor_mappings_do_not_authorize_climate_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    configured: bool,
+) -> None:
+    ha = MockHA()
+    rt = rt_of(tmp_path, Clock(NOW), ha=ha)
+    raw = rt.ctx.settings.model_dump(mode="json")
+    raw["thermostat"]["entity_id"] = TSTAT if configured else ""
+    raw["rooms"]["study"]["temp"] = TSTAT
+    raw["sensors"]["outdoor"] = TSTAT
+    rt.conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value_json, updated_at, updated_by)"
+        " VALUES ('settings', ?, ?, 'test')",
+        (json.dumps(raw), NOW.isoformat()),
+    )
+    read = rt.ha.get_state
+    seen: list[str] = []
+
+    async def record(eid: str) -> dict[str, object] | None:
+        seen.append(eid)
+        return await read(eid)
+
+    monkeypatch.setattr(rt.ha, "get_state", record)
+    try:
+        await rt.tick(NOW)
+        assert [eid for eid in seen if eid.startswith("climate.")] == (
+            [TSTAT] if configured else []
+        )
+        assert "ignoring climate entity in sensor mappings" in caplog.text
+        assert ha.calls == []
+    finally:
+        await rt.aclose()
+
+
+@pytest.mark.brd("FR-UI-2")
+@pytest.mark.parametrize(("unit", "room_temp", "outdoor"), [("°F", "68", "50"), ("°C", "20", "10")])
+async def test_tick_feeds_sensor_temperatures_to_live_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unit: str, room_temp: str, outdoor: str
+) -> None:
+    ha = MockHA()
+    room = ha.states["sensor.study_temperature"]
+    room.update(
+        state=room_temp,
+        last_changed=(NOW - timedelta(hours=8)).isoformat(),
+        last_reported=(NOW - timedelta(minutes=10)).isoformat(),
+        last_updated=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    room["attributes"]["unit_of_measurement"] = unit
+    ha.states["sensor.outdoor_temperature"]["state"] = outdoor
+    ha.states["sensor.outdoor_temperature"]["attributes"]["unit_of_measurement"] = unit
+    rt = rt_of(tmp_path, Clock(NOW), ha=ha)
+    seen: list[dict[str, float | None]] = []
+
+    async def capture(snapshot: Snapshot | None, *args: object, **kwargs: object) -> None:
+        assert snapshot is not None
+        seen.append({key: reading.temp for key, reading in snapshot.rooms.items()})
+
+    monkeypatch.setattr(rt.controller, "tick", capture)
+    queue = rt.ctx.broker.subscribe()
+    try:
+        await rt.tick(NOW)
+        stored = rt.conn.execute("SELECT snapshot_json FROM samples").fetchone()
+        assert stored is not None
+        assert json.loads(stored[0])["rooms"]["study"]["temp"] == pytest.approx(68)
+        assert rt.ctx.snapshot is not None
+        reading = rt.ctx.snapshot.rooms["study"]
+        assert reading.temp == pytest.approx(68) and reading.age_min == 1
+        assert not reading.stale
+        assert seen[0]["study"] == pytest.approx(68)  # present before the controller runs
+        assert rt.ctx.snapshot.rooms["thermostat"].temp == 71
+        assert rt.ctx.snapshot.thermostat.outdoor_temp == pytest.approx(50)
+        events = [queue.get_nowait() for _ in range(queue.qsize())]
+        assert any(event.startswith("event: snapshot\n") for event in events)
+        assert ha.calls == []
+    finally:
+        rt.ctx.broker.unsubscribe(queue)
+        await rt.aclose()
+
+
+@pytest.mark.brd("D§5.3")
+@pytest.mark.parametrize(
+    ("state", "unit", "age", "expected", "stale"),
+    [
+        ("68", "°F", 90, 68, True),
+        ("68", "°F", None, 68, True),
+        ("68", "°F", -2, 68, True),
+        ("unavailable", "°F", 0, None, False),
+        ("unknown", "°F", 0, None, False),
+        ("68", "unknown", 0, None, False),
+    ],
+)
+async def test_live_sensor_readings_do_not_reuse_missing_or_stale_values(
+    tmp_path: Path, state: str, unit: str, age: int | None, expected: float | None, stale: bool
+) -> None:
+    ha = MockHA()
+    room = ha.states["sensor.study_temperature"]
+    room["last_updated"] = room["last_reported"] = NOW.isoformat()
+    rt = rt_of(tmp_path, Clock(NOW), ha=ha)
+    try:
+        await rt.tick(NOW)
+        assert rt.ctx.snapshot is not None and rt.ctx.snapshot.rooms["study"].temp == 70.5
+        room["state"] = state
+        room["attributes"]["unit_of_measurement"] = unit
+        for field in ("last_updated", "last_reported"):
+            if age is None:
+                room.pop(field)
+            else:
+                room[field] = (NOW - timedelta(minutes=age)).isoformat()
+        await rt.tick(NOW)
+        assert rt.ctx.snapshot is not None
+        reading = rt.ctx.snapshot.rooms["study"]
+        assert reading.temp == expected and reading.stale == stale
+        assert ha.calls == []
+    finally:
+        await rt.aclose()
+
+
+@pytest.mark.brd("FR-UI-2")
+@pytest.mark.parametrize("timeout", [False, True])
+async def test_sensor_failure_is_isolated_and_new_mappings_replace_live_readings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, timeout: bool
+) -> None:
+    import asyncio
+    from typing import Any
+    from unittest.mock import AsyncMock, patch
+
+    ha = MockHA()
+    ha.states["sensor.bedroom_1_temperature"]["state"] = "71.5"
+    ha.states["sensor.bedroom_2_temperature"]["state"] = "72"
+    for state in ha.states.values():
+        state["last_updated"] = state["last_reported"] = NOW.isoformat()
+    rt = rt_of(tmp_path, Clock(NOW), ha=ha)
+    read = rt.ha.get_state
+
+    async def partially_failed(eid: str) -> dict[str, Any] | None:
+        if eid == "sensor.study_temperature":
+            if timeout:
+                await asyncio.sleep(10)
+            raise httpx.ConnectError("sensor unavailable")
+        return await read(eid)
+
+    monkeypatch.setattr("thermabot.app.main.SAMPLE_READ_TIMEOUT_S", 0.2)
+    try:
+        await rt.tick(NOW)
+        with patch.object(rt.ha, "get_state", AsyncMock(side_effect=partially_failed)) as calls:
+            await rt.tick(NOW)
+            assert [call.args[0] for call in calls.call_args_list].count(
+                "sensor.bedroom_1_temperature"
+            ) == 1
+        assert rt.ctx.snapshot is not None
+        assert rt.ctx.snapshot.rooms["study"].temp is None
+        assert rt.ctx.snapshot.rooms["bedroom_1"].temp == 71.5
+        assert not rt.ctx.snapshot.rooms["bedroom_1"].stale
+        assert "sensor read failed for sensor.study_temperature" in caplog.text
+        assert rt.ctx.ha_health == "ok"
+        raw = rt.ctx.settings.model_dump(mode="json")
+        raw["rooms"]["study"]["temp"] = "sensor.bedroom_2_temperature"
+        del raw["rooms"]["den"]
+        rt.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json, updated_at, updated_by)"
+            " VALUES ('settings', ?, ?, 'test')",
+            (json.dumps(raw), NOW.isoformat()),
+        )
+        with patch.object(rt.ha, "get_state", AsyncMock(wraps=read)) as calls:
+            await rt.tick(NOW)
+            assert [call.args[0] for call in calls.call_args_list].count(
+                "sensor.bedroom_2_temperature"
+            ) == 1
+        assert rt.ctx.snapshot is not None
+        assert rt.ctx.snapshot.rooms["study"].temp == 72
+        assert "den" not in rt.ctx.snapshot.rooms
+        assert ha.calls == []
+    finally:
+        await rt.aclose()
 
 
 async def test_opening_assessment_is_sampled_and_persisted(tmp_path: Path) -> None:

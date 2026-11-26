@@ -44,6 +44,130 @@ def test_save_valid_settings_replans(page: Page, srv: Srv) -> None:
 
 
 @pytest.mark.brd("FR-CFG-1")
+@pytest.mark.parametrize(("width", "user"), [(390, "ann"), (1440, "alex")])
+def test_presence_people_can_be_added_and_removed(
+    page: Page, srv: Srv, width: int, user: str
+) -> None:
+    data = srv.ctx.settings.model_dump(mode="json")
+    data["presence"]["people"] = {}
+    srv.ctx.settings = type(srv.ctx.settings).model_validate(data)
+    before = srv.ctx.settings.model_dump(mode="json")
+    state = srv.ctx.eff().state
+    page.set_viewport_size({"width": width, "height": 900})
+    login(page, srv, user)
+    page.goto(f"{srv.url}/settings/people")
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    expect(page.locator("[data-people-empty]")).to_be_visible()
+    page.get_by_role("button", name="Add person", exact=True).click()
+    row = page.locator("[data-testid=person-row]").last
+    row.locator("[data-p=name]").fill("Taylor")
+    row.locator("[data-p=companion]").fill("person.taylor")
+    expect(page.locator("[data-people-empty]")).to_be_hidden()
+    assert srv.ctx.settings.presence.people == {}  # draft only
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    page.reload()
+    assert srv.ctx.settings.presence.people["taylor"].companion == "person.taylor"
+    expected = before
+    expected["presence"]["people"] = {"taylor": {"life360": None, "companion": "person.taylor"}}
+    assert srv.ctx.settings.model_dump(mode="json") == expected
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    page.get_by_role("button", name="Remove person", exact=True).click()
+    expect(page.locator("[data-testid=confirm-sheet]")).to_contain_text("always counts as occupied")
+    page.click("[data-testid=confirm-yes]")
+    assert "taylor" in srv.ctx.settings.presence.people  # removal is also a draft
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    page.reload()
+    expect(page.locator("[data-people-empty]")).to_be_visible()
+    assert srv.ctx.settings.presence.people == {}
+    assert srv.ctx.eff().state == state
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_presence_editor_rejects_incomplete_duplicate_and_excluded_people(
+    page: Page, srv: Srv
+) -> None:
+    before = srv.ctx.settings.model_dump(mode="json")
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    page.get_by_role("button", name="Add person", exact=True).click()
+    row = page.locator("[data-testid=person-row]").last
+    for name, tracker, message in (
+        ("", "", "name"),
+        ("Alex", "person.alex", "already"),
+        ("Casey", "person.alex", "excluded"),
+        ("Taylor", "", "tracker"),
+        ("Taylor", "not an entity", "entity"),
+    ):
+        row.locator("[data-p=name]").fill(name)
+        row.locator("[data-p=companion]").fill(tracker)
+        page.click("[data-testid=settings-save]")
+        expect(page.locator("[data-people-errors]")).to_contain_text(message)
+        assert srv.ctx.settings.model_dump(mode="json") == before
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_presence_editor_preserves_saved_names_when_discovery_fails(page: Page, srv: Srv) -> None:
+    data = srv.ctx.settings.model_dump(mode="json")
+    data["presence"]["people"]["Alex Home"] = data["presence"]["people"].pop("alex")
+    srv.ctx.settings = type(srv.ctx.settings).model_validate(data)
+    before = srv.ctx.settings.model_dump(mode="json")
+    page.route(
+        "**/api/setup/discover**",
+        lambda route: route.fulfill(status=503, json={"detail": "Home Assistant unavailable"}),
+    )
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    expect(page.locator("[data-people-status]")).to_contain_text("Discovery failed")
+    expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
+    row = page.locator("[data-testid=person-row]").filter(
+        has=page.locator('[data-p=name][value="Alex Home"]')
+    )
+    row.locator("[data-p=companion]").fill("person.taylor")
+    page.click("[data-testid=settings-save]")
+    expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
+    before["presence"]["people"]["Alex Home"]["companion"] = "person.taylor"
+    assert srv.ctx.settings.model_dump(mode="json") == before
+    assert srv.ctx.mock_ha.calls == []  # type: ignore[attr-defined]
+    srv.errors.clear()  # expected mocked discovery failures
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-UI-1")
+@pytest.mark.parametrize(("user", "width"), [("alex", 390), ("ann", 1440)])
+def test_settings_navigation_persists_on_utility_pages(
+    page: Page, srv: Srv, user: str, width: int
+) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    login(page, srv, user)
+    page.goto(f"{srv.url}/settings")
+    paths = [("Health", "health"), ("Account", "account")]
+    if user == "alex":
+        paths = [("Backup", "recovery"), *paths, ("Users", "users")]
+    for label, path in paths:
+        nav = page.get_by_role("navigation", name="Settings", exact=True)
+        nav.get_by_role("link", name=label, exact=True).click()
+        page.wait_for_url(f"{srv.url}/{path}")
+        expect(nav).to_be_visible()
+        expect(nav.get_by_role("link", name=label, exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
+        expect(page.locator("[data-testid=nav] [aria-current=page]")).to_have_text("⚙Settings")
+        if user == "ann":
+            expect(nav.get_by_role("link", name="Backup", exact=True)).to_have_count(0)
+            expect(nav.get_by_role("link", name="Users", exact=True)).to_have_count(0)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        nav.get_by_role("link", name="Comfort", exact=True).click()
+        page.wait_for_url(f"{srv.url}/settings")
+        assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
 def test_home_editor_removes_room_weights_and_protects_assigned_rooms(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
     page.goto(f"{srv.url}/settings/people")
