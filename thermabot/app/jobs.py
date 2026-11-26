@@ -382,7 +382,19 @@ def extra_entities(s: Settings) -> list[str]:
     """Configured blower/compressor/outdoor(/humidity) ids in the legacy order; empty ones
     are skipped (not configured = not read)."""
     x = s.sensors
-    return [e for e in (x.blower, x.compressor, x.outdoor, x.humidity) if e]
+    return [
+        e
+        for e in (
+            x.blower,
+            x.compressor,
+            x.outdoor,
+            x.humidity,
+            x.energy,
+            x.power,
+            x.auxiliary_heat,
+        )
+        if e
+    ]
 
 
 def _stamp(st: dict[str, Any], key: str) -> datetime | None:
@@ -395,6 +407,55 @@ def _stamp(st: dict[str, Any], key: str) -> datetime | None:
 
 def _state_num(st: dict[str, Any] | None) -> float | None:
     return None if st is None else num(st.get("state"))
+
+
+def sensor_measurement(
+    now: datetime, st: dict[str, Any] | None, kind: Literal["energy", "power", "humidity", "aux"]
+) -> dict[str, Any]:
+    """Unit-normalized, timestamped telemetry; no sensor grants an actuator permission."""
+    value: float | bool | None = _state_num(st)
+    if st is not None:
+        unit = (st.get("attributes") or {}).get("unit_of_measurement")
+        if kind == "aux":
+            state = str(st.get("state", "")).lower()
+            value = (
+                True
+                if state in ("on", "1", "true")
+                else False
+                if state in ("off", "0", "false")
+                else None
+            )
+            if value is None and state not in ("unknown", "unavailable", ""):
+                log.warning(
+                    "ignoring auxiliary-heat sensor %s: invalid state", st.get("entity_id", "")
+                )
+        elif value is not None:
+            factors: dict[str, dict[str, float]] = {
+                "energy": {"kWh": 1, "Wh": 0.001, "MWh": 1000},
+                "power": {"kW": 1, "W": 0.001},
+                "humidity": {"%": 1},
+            }
+            factor = factors[kind].get(unit) if isinstance(unit, str) else None
+            if factor is None or value < 0 or (kind == "humidity" and value > 100):
+                log.warning(
+                    "ignoring %s sensor %s: invalid value or unit %r",
+                    kind,
+                    st.get("entity_id", ""),
+                    unit,
+                )
+                value = None
+            else:
+                value *= factor
+    stamps = (
+        []
+        if st is None
+        else [t for key in ("last_reported", "last_updated") if (t := _stamp(st, key)) is not None]
+    )
+    return {
+        "value": value,
+        "age_min": room_age_min(now, max(stamps) if stamps else None),
+        "source": None if st is None else st.get("entity_id"),
+    }
 
 
 def _temp_f(st: dict[str, Any] | None) -> float | None:
@@ -437,6 +498,7 @@ def room_readings(
             reported = None if st is None else _stamp(st, "last_reported")
             updated = None if st is None else _stamp(st, "last_updated")
         age = room_age_min(now, reported, updated)
+        rh = sensor_measurement(now, states.get(cfg.humidity), "humidity") if cfg.humidity else {}
         stamps = [stamp for stamp in (reported, updated) if stamp is not None]
         readings[key] = RoomReading(
             key=key,
@@ -444,6 +506,8 @@ def room_readings(
             last_reported=max(stamps) if stamps else None,
             age_min=None if age is None else round(age, 1),
             stale=temp is not None and (age is None or age < 0 or age > cfg.stale_min),
+            humidity=rh.get("value"),
+            humidity_age_min=rh.get("age_min"),
         )
     return readings
 
@@ -490,11 +554,36 @@ def sample_doc(
     sn = s.sensors
     blower = states.get(sn.blower) if sn.blower else None
     cs_raw = _state_num(states.get(sn.compressor)) if sn.compressor else None
+    compressor_state = states.get(sn.compressor) if sn.compressor else None
+    compressor_stamps = (
+        []
+        if compressor_state is None
+        else [
+            t
+            for key in ("last_reported", "last_updated")
+            if (t := _stamp(compressor_state, key)) is not None
+        ]
+    )
+    tstat_cfg = s.rooms.get("thermostat")
+    humidity_sensor = tstat_cfg.humidity if tstat_cfg and tstat_cfg.humidity else sn.humidity
     humidity = None if th is None else th.humidity
     if sn.humidity:
         humidity = _state_num(states.get(sn.humidity))
     rooms = {
-        key: {"temp": reading.temp, "age_min": reading.age_min}
+        key: {
+            "temp": reading.temp,
+            "age_min": reading.age_min,
+            **(
+                {"humidity": sensor_measurement(now, states.get(s.rooms[key].humidity), "humidity")}
+                if s.rooms[key].humidity
+                else {}
+            ),
+            **(
+                {"energy": sensor_measurement(now, states.get(s.rooms[key].energy), "energy")}
+                if s.rooms[key].energy
+                else {}
+            ),
+        }
         for key, reading in room_readings(now, s, th, states).items()
         if key != "thermostat"
     }
@@ -504,16 +593,32 @@ def sample_doc(
         if th is None
         else {
             "temp": th.current_temp,
+            "age_min": room_age_min(now, th.last_reported),
             "heat_sp": th.heat_sp,
             "cool_sp": th.cool_sp,
             "hvac_mode": th.hvac_mode,
             "hvac_action": th.hvac_action,
             "fan_mode": th.fan_mode,
             "humidity": humidity,
+            "humidity_reading": sensor_measurement(now, states.get(humidity_sensor), "humidity")
+            if humidity_sensor
+            else {
+                "value": th.humidity,
+                "age_min": room_age_min(now, th.last_reported),
+                "source": s.thermostat.entity_id,
+            },
         },
         "blower": None if blower is None else num(blower.get("state")),
         "cs_raw": cs_raw,
         "cs": normalise_cs(cs_raw),
+        "compressor_age_min": room_age_min(
+            now, max(compressor_stamps) if compressor_stamps else None
+        ),
+        "energy": sensor_measurement(now, states.get(sn.energy), "energy") if sn.energy else None,
+        "power": sensor_measurement(now, states.get(sn.power), "power") if sn.power else None,
+        "auxiliary_heat": sensor_measurement(now, states.get(sn.auxiliary_heat), "aux")
+        if sn.auxiliary_heat
+        else None,
         "t_out": _temp_f(states.get(sn.outdoor)) if sn.outdoor else None,
         "t_out_fc": None if forecast is None else forecast_at(forecast, now),
         "rooms": rooms,

@@ -28,6 +28,7 @@ class RoomReading(BaseModel):
     key: str
     temp: float | None
     humidity: float | None = None
+    humidity_age_min: float | None = None
     last_reported: datetime | None = None
     age_min: float | None = None
     stale: bool = False

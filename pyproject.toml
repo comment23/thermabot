@@ -1,6 +1,6 @@
 [project]
 name = "thermabot"
-version = "0.6.8"
+version = "0.7.0"
 requires-python = ">=3.12"
 
 [tool.ruff]

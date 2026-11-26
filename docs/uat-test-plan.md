@@ -2,7 +2,13 @@
 
 ## Target and purpose
 
-Plan version 1, created 2026-11-25. Initial execution target:
+Plan version 3, updated 2026-11-26 for application **0.7.0** and add-on candidate
+**0.7.0-rc.1**. Current execution target is the unpublished working candidate, including
+room research tools, room UI and Simple preferences. Record HEAD, dirty-source identity
+and application-source SHA-256 before/after; a HEAD commit alone does not identify
+uncommitted code. This run does not certify an existing tag or published image.
+
+Historical version-1 target (retain previous evidence under that identity):
 
 - Published prerelease **v0.6.8-rc.11**.
 - Peeled Git commit **6abffee7bb3669835d45752bb8f837bd847b2072**.
@@ -10,7 +16,7 @@ Plan version 1, created 2026-11-25. Initial execution target:
 - The working branch and its uncommitted fixes are **not** the published RC.
 
 Validate a customer's complete installation, setup, daily-use, recovery and failure
-experience, not merely whether individual functions pass tests. Keep published application
+experience, not merely whether individual functions pass tests. Keep candidate application
 bytes unchanged during the run. Record original regression results separately from the
 new full-runtime customer harness; seeded UI snapshots are not proof of HA-to-dashboard
 data flow.
@@ -19,12 +25,25 @@ This plan includes external installation and live-soak gates even when they cann
 executed safely in automated UAT. **NOT RUN, BLOCKED and partial evidence are not PASS.**
 See the [harness guide](uat.md) and [release gate](v0.6.8-plan.md).
 
+### Maintenance and pre-GitHub QA gate
+
+Every program/UI/API/schema change must update the affected UAT cases, scenario tooling and
+customer journeys before shipping. Run current-source UAT as part of QA **before push,
+merge or publication to GitHub**; stale acceptance or unresolved P0/P1 failures is a no-go.
+Local working-candidate acceptance and later immutable-tag/image provenance are different
+stages. Record the change scope and all exclusions; a new version number does not waive
+the live-soak or Owner-review gates. See [CONTRIBUTING](../CONTRIBUTING.md#before-you-push).
+
 ## Environment and safety
 
-1. Freeze the published tag into a dedicated test directory using
+1. For published-candidate validation, freeze the tag into a dedicated test directory using
    `git -c core.autocrlf=false -c core.eol=lf archive`; verify the remote tag's peeled
    commit and every extracted Git blob hash. Plain Windows `git archive` can honor
    `core.autocrlf` and alter vendor bytes. Never change global Git settings to work around it.
+   For pre-publication QA, fingerprint all candidate application/configuration/manifest
+   files, including untracked source, and verify the digest before/after. Do not treat
+   working source as the older RC. Product fixes invalidate affected acceptance: preserve
+   the failure, compute the new source identity and retest dependent cases.
 2. Use Python 3.12 and the matching hashed development lock. Record OS, interpreter,
    browser, source/archive hashes, commands, exits and collection counts.
 3. Execute on Windows loopback and the disposable isolated Linux UAT VM. VM dependency
@@ -41,6 +60,10 @@ See the [harness guide](uat.md) and [release gate](v0.6.8-plan.md).
 7. Keep new harness files separate from the frozen RC. Overlay only test tooling and its
    test helpers into a second snapshot, never application, templates, static assets,
    migrations, configuration defaults, adapters or core.
+8. For UAT-67-71 use the qualified stopped-only `room-history` / `room-model` replays.
+   Validate the actual daily rollup coverage/counts and model training/holdout results
+   before accepting positive customer outcomes. Replayed minutes and an injected
+   retention clock are explicitly simulated and never satisfy UAT-58's real soak.
 
 ### Personas and matrix
 
@@ -67,7 +90,7 @@ snapshots or replacement controllers.
 | A | Frozen tag/hash, versions, [add-on manifest](../addon/config.yaml), published image digests and exact-commit CI; Ruff, strict mypy, JS syntax and manifest validator |
 | S | [Setup UI](../tests/e2e/test_setup_wizard.py), [first-run UI](../tests/e2e/test_first_run_ui.py), [first-run API](../tests/integration/test_first_run.py), [setup-needed](../tests/integration/test_setup_needed.py), [setup API](../tests/integration/test_setup_api.py) |
 | R | [Auth](../tests/unit/test_auth.py), [permissions](../tests/unit/test_permissions.py), [users UI](../tests/e2e/test_p7_users.py), [password UI](../tests/e2e/test_p7_password.py), [password API](../tests/integration/test_api_password.py) |
-| C | [Settings UI](../tests/e2e/test_p3_settings.py), [configuration](../tests/unit/test_config.py), [schedule](../tests/unit/test_schedule.py), [seasonal runtime](../tests/integration/test_seasonal_runtime.py) |
+| C | [Settings UI](../tests/e2e/test_p3_settings.py), [Simple preferences UI](../tests/e2e/test_simple_settings.py), [preference API](../tests/integration/test_preferences_api.py), [preference policy](../tests/unit/test_preferences.py), [configuration](../tests/unit/test_config.py), [schedule](../tests/unit/test_schedule.py), [seasonal runtime](../tests/integration/test_seasonal_runtime.py) |
 | L | [Controls UI](../tests/e2e/test_controls_recovery.py), [kill API](../tests/integration/test_kill_api.py), [Watch continuity](../tests/integration/test_kill_soak.py), [state machine](../tests/unit/test_statemachine.py) |
 | P | [Presence policy](../tests/unit/test_presence.py), [runtime presence](../tests/integration/test_presence_wiring.py) |
 | T | [Runtime jobs](../tests/integration/test_jobs.py), [thermostat parsing](../tests/unit/test_thermostat_parse.py), [comfort freshness](../tests/unit/test_comfort_stale.py), [HA REST](../tests/integration/test_ha_rest.py) |
@@ -78,7 +101,8 @@ snapshots or replacement controllers.
 | B | [Recovery](../tests/integration/test_recovery.py), [database](../tests/integration/test_db.py), [controls/recovery UI](../tests/e2e/test_controls_recovery.py), [crash](../tests/integration/test_crash.py) |
 | V | [Layout](../tests/e2e/test_layout.py), [mobile](../tests/e2e/test_mobile.py), [visual/accessibility/budgets](../tests/e2e/test_ui_v060.py) |
 | K | [Guards](../tests/unit/test_guards.py), [safety](../tests/unit/test_safety.py), [single write path](../tests/unit/test_single_write_path.py), [core purity](../tests/unit/test_core_purity.py) |
-| U | [Full-runtime customer journeys](../tests/uat/test_customer_journeys.py), [customer operations](../tests/uat/test_customer_operations.py), [lab boundaries](../tests/integration/test_uat_lab.py) |
+| U | [Full-runtime customer journeys](../tests/uat/test_customer_journeys.py), [customer operations](../tests/uat/test_customer_operations.py), [0.7 customer journeys](../tests/uat/test_customer_rooms_preferences.py), [lab boundaries](../tests/integration/test_uat_lab.py) |
+| I | [Room insights policy](../tests/unit/test_room_insights.py), [room API](../tests/integration/test_room_insights_api.py), [room UI](../tests/e2e/test_p8_room.py), [full-runtime room journeys](../tests/uat/test_customer_rooms_preferences.py) |
 | X | Explicitly authorized external/manual evidence, not fabricated by mocks or CI |
 
 ## Test cases
@@ -92,7 +116,7 @@ when a prerequisite failed or only policy-level regression evidence exists.
 
 | ID | Priority | Customer action / injection | Expected result | Evidence |
 | --- | --- | --- | --- | --- |
-| UAT-01 | P0 | Pin tag; compare remote commit, app/add-on versions and image refs | Exact RC identified; intentional version difference documented; no local fixes included | A |
+| UAT-01 | P0 | Identify unpublished source or pin published tag; compare source digest, app/add-on versions and image refs | Exact candidate identified; source changes and publication status explicit; no older-tag certification | A |
 | UAT-02 | P1 | Fresh directory; open Home; create initial Owner | Normal registration, signed-in setup; stopped/SHADOW defaults unchanged | S, U |
 | UAT-03 | P0 | Invalid password confirmation, duplicate/concurrent initial registration | Visible errors; exactly one initial Owner; no control enabled | S, R |
 | UAT-04 | P0 | Open an existing configured/imported install | No re-registration, overwritten accounts, forced wizard or replaced configuration | S, B |
@@ -178,15 +202,33 @@ when a prerequisite failed or only policy-level regression evidence exists.
 | UAT-59 | P0 | Owner reviews soak, independent safety net and unresolved defects | Explicit dated go/no-go; no implicit approval from green automated tests or rc.11 exception | X |
 | UAT-60 | P1 | Reconcile all cases, defects, evidence and skipped/blocked stages | Scoped decision, reproducible results and retest list; no claim of a stable/live release | A, U, X |
 
+### 0.7 room insights and simpler configuration
+
+| ID | Priority | Customer action / injection | Expected result | Evidence |
+| --- | --- | --- | --- | --- |
+| UAT-61 | P1 | Owner/Admin opens Simple settings in F/C, phone/tablet/desktop, keyboard and light/dark | Saved ideal starts at 73 F; custom configuration stays untouched; three accessible priority positions and important-room choices | C, U |
+| UAT-62 | P0 | Preview Comfort/Balanced/Efficiency, cancel, edit draft, re-preview and apply; tick/reload | Reviewed ideal +/-1/2/3 F bands; automatic deadband widening disclosed; equal Home/Sleep influence reaches real controller; Away/schedule/safety/mode preserved | C, U |
+| UAT-63 | P0 | Another tab changes settings after preview; tamper draft/fingerprint; unsafe reference or fallback | Stale/changed/unsafe apply rejected explicitly; another review required; no partial save or loosened safety | C, K, U |
+| UAT-64 | P1 | Open Advanced; edit numeric comfort/units and reload/tick | Legacy technical controls remain usable in Advanced; untouched 22.8 C preserves exactly 73 F; edited C follows 0.5 F rounding | C, U |
+| UAT-65 | P0 | Map humidity/dedicated meter and passive equipment; run measured room scenario | Fresh source-identified pairs/deltas reach history/report; dedicated versus central scope explicit; no actuator authorization | I, T, K, U |
+| UAT-66 | P1 | Summary -> Temperatures -> Efficiency -> Tools; change room and 24h/7d/30d; F/C on phone/desktop with standard and enlarged text | Current/ideal delta, coverage, period labels and rounded interval means agree; chart gaps stay null; table contents wrap without horizontal overflow; nudges reachable on every tab | I, V, U |
+| UAT-67 | P1 | Quality/humidity/weekly actions with sparse/fresh/stale data; two completed weather windows and cycling/aux states | Insufficient evidence explicit; humidity 30-60%; no invented savings or auxiliary inference; qualifying disagreements/weather/cycling produce only evidence-backed actions | I, T, U |
+| UAT-68 | P0 | Setback tool without model/readings/forecast, then with genuinely validated simulated model and sufficient forecast | Missing inputs rejected; ready request returns labeled baseline/proposed/recovery results, no setting changes or climate writes | I, F, W, U |
+| UAT-69 | P1 | Tariff tool with missing/flat/distinct rates and rated-power assumptions | Constraints explicit; ready comparison labeled simulated; estimates never replace measured kWh or become automatic actuator policy | I, U |
+| UAT-70 | P0 | No schedule evidence, then five qualifying Away days; cancel/approve, repeat with stale fingerprint | No fabricated suggestion; approval changes only shared schedule, preserves control/safety; stale approval rejected; Members cannot approve | I, C, R, U |
+| UAT-71 | P1 | Record improvement, reload/restart; compare qualifying windows; change settings | Experiment persists in migration 005; sparse comparisons stay unavailable; completed comparisons retained; confounding settings change disclosed | I, B, U |
+| UAT-72 | P0 | Member changes room query/crafts room or Simple API mutation | Assigned-room scope and Owner/Admin mutation boundaries enforced by server, not only hidden buttons | I, R, U |
+| UAT-73 | P0 | Reconcile program changes with playbook, evidence and shipping checklist | Updated, current-candidate UAT is included in QA before any GitHub shipping; no stale or partial evidence reported as complete acceptance | A, U |
+
 ## Execution protocol
 
-1. Execute the frozen RC unit suite with **unit-only core coverage >=90%**, integration
+1. Execute the candidate unit suite with **unit-only core coverage >=90%**, integration
    suite, all existing E2E tests and static/manifest checks. Do not boost the unit coverage
    number by combining integration tests into that coverage run.
-2. Run the full-runtime customer suite against unchanged RC application code using the
-   separate tooling overlay. Verify package source hashes before/after. Run a separate
-   harness preflight against the working tree when validating new test selectors; label it
-   **unreleased harness preflight**, never RC acceptance.
+2. Run the updated full-runtime customer suite against unchanged candidate application
+   code. For published tags use the separate tooling overlay; for working candidates
+   identify the run as **unpublished 0.7 source UAT**. Verify source hashes before/after.
+   A test-selector-only correction may be retested without calling it a product fix.
 3. Capture JUnit requirement tags, command exits and nonzero collection; screenshots and
    JSON evidence for customer journeys. Keep original failures. Retry a genuinely
    random-port/browser infrastructure failure at most once with the exact selector and

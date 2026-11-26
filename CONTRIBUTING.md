@@ -32,12 +32,21 @@ playwright install chromium                       # for the e2e tests
 
 ## Before you push
 
+**UAT is a required QA gate before shipping changes to GitHub** (push, merge or
+tag/release/image publication). Whenever program behavior, UI, APIs or stored data change,
+update the [UAT playbook](docs/uat-test-plan.md) and affected customer journeys in the same
+change. Execute the updated playbook against the exact candidate and record source identity,
+actual outcomes, failures and unrun gates. Stale UAT or unresolved P0/P1 failures blocks
+shipping; regression tests alone are not customer acceptance. No result authorizes
+publication, physical actuation or waiver of the live-soak/Owner gates.
+
 ```bash
 ruff format --check .
 ruff check .
 mypy --strict thermabot
 python -m pytest tests/unit tests/integration -q
 python -m pytest tests/e2e -q
+python -m pytest tests/uat tests/integration/test_uat_lab.py -q --tb=short --junitxml=junit-uat.xml --uat-artifacts=.uat-results
 ```
 
 Tag new tests with the requirement they cover: `@pytest.mark.brd("FR-...")`.

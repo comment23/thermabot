@@ -210,6 +210,53 @@ async def test_tick_feeds_sensor_temperatures_to_live_snapshot(
         await rt.aclose()
 
 
+@pytest.mark.brd("FR-MET-1")
+async def test_new_insight_sensors_are_read_once_and_never_actuated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ha = MockHA()
+    mappings = {
+        "humidity": ("sensor.bedroom_1_humidity", "50", "%"),
+        "energy": ("sensor.hvac_energy", "1000", "Wh"),
+        "power": ("sensor.hvac_power", "3000", "W"),
+        "auxiliary_heat": ("binary_sensor.hvac_auxiliary_heat", "on", None),
+    }
+    for entity, value, unit in mappings.values():
+        ha.states[entity] = {
+            "entity_id": entity,
+            "state": value,
+            "last_reported": NOW.isoformat(),
+            "attributes": {"unit_of_measurement": unit},
+        }
+    rt = rt_of(tmp_path, Clock(NOW), ha=ha)
+    seen: list[str] = []
+    read = rt.ha.get_state
+
+    async def record(entity: str) -> dict[str, object] | None:
+        seen.append(entity)
+        return await read(entity)
+
+    monkeypatch.setattr(rt.ha, "get_state", record)
+    raw = rt.ctx.settings.model_dump(mode="json")
+    for kind, (entity, _, _) in mappings.items():
+        raw["sensors"][kind] = entity
+    raw["rooms"]["bedroom_1"]["humidity"] = mappings["humidity"][0]
+    rt.conn.execute("UPDATE settings SET value_json=? WHERE key='settings'", (json.dumps(raw),))
+    try:
+        await rt.tick(NOW)
+        stored = json.loads(rt.conn.execute("SELECT snapshot_json FROM samples").fetchone()[0])
+        assert stored["energy"]["value"] == 1 and stored["power"]["value"] == 3
+        assert stored["auxiliary_heat"]["value"] is True
+        assert stored["rooms"]["bedroom_1"]["humidity"]["value"] == 50
+        assert stored["tstat"]["humidity_reading"]["value"] == 50
+        assert rt.ctx.snapshot is not None
+        assert rt.ctx.snapshot.rooms["bedroom_1"].humidity == 50
+        assert all(seen.count(entity) == 1 for entity, _, _ in mappings.values())
+        assert ha.calls == []
+    finally:
+        await rt.aclose()
+
+
 @pytest.mark.brd("D§5.3")
 @pytest.mark.parametrize(
     ("state", "unit", "age", "expected", "stale"),

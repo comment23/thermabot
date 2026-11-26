@@ -4,6 +4,8 @@ and Owner-only; °C display converts at the edge only."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -29,7 +31,7 @@ def test_save_valid_settings_replans(page: Page, srv: Srv) -> None:
     srv.ctx.replan = lambda: replans.append(1)
     before = srv.ctx.settings.model_dump(mode="json")
     login(page, srv, "ann")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     _open(page, "bands")
     page.fill("[data-path='bands.heat.home.0']", "67")
     page.fill("[data-path='bands.heat.home.1']", "70")
@@ -40,6 +42,37 @@ def test_save_valid_settings_replans(page: Page, srv: Srv) -> None:
     after = srv.ctx.settings.model_dump(mode="json")
     before["bands"]["heat"]["home"] = [67, 70]
     assert after == before  # nothing else changed
+    assert_page_healthy(page, srv)
+
+
+@pytest.mark.brd("FR-CFG-1")
+def test_room_humidity_and_energy_mappings_are_discovered_and_saved(page: Page, srv: Srv) -> None:
+    ha = srv.ctx.mock_ha
+    for kind, value, unit in (("humidity", "50", "%"), ("energy", "10", "kWh")):
+        entity = f"sensor.bedroom_1_{kind}"
+        ha.states[entity] = {
+            "entity_id": entity,
+            "state": value,
+            "last_updated": datetime.now(UTC).isoformat(),
+            "attributes": {
+                "unit_of_measurement": unit,
+                "device_class": kind,
+                "friendly_name": f"Bedroom {kind}",
+            },
+        }
+    login(page, srv, "alex")
+    page.goto(f"{srv.url}/settings/people")
+    row = page.locator('[data-home-room="bedroom_1"]')
+    for kind in ("humidity", "energy"):
+        select = row.locator(f"[data-r={kind}]")
+        expect(select.locator(f'option[value="sensor.bedroom_1_{kind}"]')).to_have_count(1)
+        select.select_option(f"sensor.bedroom_1_{kind}")
+    page.get_by_test_id("settings-save").click()
+    expect(page.get_by_test_id("toast")).to_contain_text("Saved")
+    page.reload()
+    assert srv.ctx.settings.rooms["bedroom_1"].humidity == "sensor.bedroom_1_humidity"
+    assert srv.ctx.settings.rooms["bedroom_1"].energy == "sensor.bedroom_1_energy"
+    assert ha.calls == []
     assert_page_healthy(page, srv)
 
 
@@ -246,7 +279,7 @@ def test_unchanged_save_is_disabled_and_writes_nothing(page: Page, srv: Srv) -> 
     before = srv.ctx.settings.model_dump(mode="json")
     row = srv.ctx.conn.execute("SELECT updated_at, updated_by FROM settings").fetchall()
     login(page, srv, "alex")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     btn = page.locator("[data-testid=settings-save]")
     expect(btn).to_be_disabled()
     expect(btn).to_have_text("No changes")
@@ -275,7 +308,7 @@ def test_validation_errors_shown_per_field(
 ) -> None:
     login(page, srv, "alex")
     dest = {"safety": "/settings/safety", "schedule": "/settings/schedule"}.get(
-        section, "/settings"
+        section, "/settings/advanced"
     )
     page.goto(f"{srv.url}{dest}")
     if section != "schedule":
@@ -341,7 +374,7 @@ def test_active_thermostat_change_explains_that_control_must_stop(page: Page, sr
 @pytest.mark.brd("FR-CFG-1")
 def test_owner_json_view_is_read_only(page: Page, srv: Srv) -> None:
     login(page, srv, "alex")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     page.locator("[data-testid=advanced] summary").click()
     box = page.locator("[data-testid=settings-json]")
     expect(box).to_be_visible()
@@ -355,13 +388,13 @@ def test_celsius_display_round_trip(page: Page, srv: Srv) -> None:
     """Switch to °C; untouched temperatures save back to the exact stored °F; an edited one
     is converted to °F at the edge (21.5 °C -> 70.5 °F)."""
     login(page, srv, "alex")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     _open(page, "display")
     page.select_option("[data-path='display.units']", "C")
     page.click("[data-testid=settings-save]")
     expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")
     page.wait_for_load_state("load")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     s0 = srv.ctx.settings
     assert s0.display.units == "C" and s0.bands.heat.home == (68, 71)
     expect(page.locator("[data-path='bands.heat.home.0']")).to_have_value("20.0")
@@ -369,7 +402,7 @@ def test_celsius_display_round_trip(page: Page, srv: Srv) -> None:
     expect(page.locator("[data-testid=settings-save]")).to_be_disabled()
     s1 = srv.ctx.settings
     assert s1.model_dump() == s0.model_dump()
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     page.fill("[data-path='bands.heat.home.1']", "21.5")
     page.click("[data-testid=settings-save]")
     expect(page.locator("[data-testid=toast]")).to_contain_text("Saved")

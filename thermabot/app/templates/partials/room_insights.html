@@ -1,0 +1,121 @@
+{% if room_view == 'overview' %}
+<div class="grid-2">
+<section class="card" data-testid="sensor-diagnostics">
+  <h3>Room sensor quality · last 7 days</h3>
+  <p>{{ insights.quality.measured }} measured minutes; {{ '%.1f'|format(insights.quality.coverage_pct) }}% weekly coverage.
+    {{ insights.quality.stale }} stale / unknown-age and {{ insights.quality.missing }} missing.</p>
+  {% if insights.quality.persistent_disagreement %}<p class="banner">Persistent room / thermostat disagreement detected. Check placement and airflow before assuming calibration drift.</p>{% endif %}
+  <p class="muted">{{ insights.quality.note }}</p>
+</section>
+<section class="card" data-testid="humidity-comfort">
+  <h3>Room humidity-aware comfort · last 7 days</h3>
+  {% if insights.humidity.minutes %}<p>Mean {{ '%.1f'|format(insights.humidity.mean_rh) }}% RH.
+    {{ insights.humidity.outside_rh_minutes }} minutes outside 30–60% RH.
+    {{ '%.1f'|format(insights.humidity.comfortable_pct) }}% met both temperature and humidity references.</p>
+  {% else %}<p class="empty">No fresh paired room-temperature / humidity readings. Map a room humidity sensor in Home &amp; rooms.</p>{% endif %}
+  <p class="muted">{{ insights.humidity.note }}</p>
+</section>
+</div>
+{% endif %}
+{% if room_view == 'efficiency' %}
+<div class="grid-2">
+<section class="card" data-testid="meter-energy">
+  <h3>Metered energy and costs · last 7 days</h3>
+  <p>Scope: <strong>{{ insights.energy.scope }}</strong>. Central HVAC energy is not allocated to this room.</p>
+  {% if insights.energy.kwh is not none %}<p>{{ '%.3f'|format(insights.energy.kwh) }} kWh over {{ '%.0f'|format(insights.energy.covered_minutes) }} covered minutes in the last week.
+    Cost estimate: {% if insights.energy.cost is not none %}{{ '%.2f'|format(insights.energy.cost) }} {{ insights.energy.currency }}{% else %}tariff not configured{% endif %}.</p>
+  {% else %}<p class="empty">No usable meter / power intervals. Configure a central HVAC meter or a dedicated room energy meter; runtime is not kWh.</p>{% endif %}
+  <p class="muted">{{ insights.energy.method }}. {{ insights.energy.resets }} resets and {{ insights.energy.gaps }} gaps/source changes excluded. {{ insights.energy.note }}</p>
+</section>
+<section class="card" data-testid="weather-performance">
+  <h3>Central HVAC · weather-normalized performance</h3>
+  <p class="muted">Previous versus latest completed 14-day window; not room-only energy.</p>
+  {% if insights.weather.available %}<p{% if insights.weather.worse %} class="banner"{% endif %}>{{ '%.1f'|format(insights.weather.change_pct) }}% change in {{ insights.weather.season }} runtime per degree-day.
+    {{ insights.weather.baseline_days }} baseline and {{ insights.weather.recent_days }} recent comparable days. Positive means more runtime.</p>
+  {% else %}<p class="empty">Collecting comparable weather evidence.</p>{% endif %}
+  <p class="muted">{{ insights.weather.note }}</p>
+</section>
+</div>
+<section class="card" data-testid="heat-pump-diagnostics">
+  <h3>Central HVAC diagnostics · last 7 days</h3>
+  <p>{{ insights.equipment.known_minutes }} known equipment-state minutes; {{ insights.equipment.starts }} observed starts,
+    {{ insights.equipment.short_runs }} completed short runs. Auxiliary heat: {{ insights.equipment.aux_minutes|num }} observed minutes.</p>
+  {% if insights.equipment.cycling_alert %}<p class="banner">Repeated short cycling detected. Review with an HVAC professional; Thermabot will not alter equipment controls.</p>{% endif %}
+  {% if insights.equipment.mean_cooling_speed is not none %}<p>Mean observed cooling compressor speed: {{ '%.0f'|format(insights.equipment.mean_cooling_speed * 100) }}%. This is not metered energy.</p>{% endif %}
+  <p class="muted">{{ insights.equipment.note }} Auxiliary heat requires an explicit, fresh equipment-state mapping; room-temperature spikes are not auxiliary-heat measurements.</p>
+</section>
+{% endif %}
+{% if room_view == 'tools' %}
+<section id="room-setup" class="card" data-testid="room-setup">
+  <h3>Setup checklist · {{ readiness.ready_count }}/{{ readiness.total }} inputs ready</h3>
+  <p>Checked at page load for a 4-hour comparison plus 4 hours of recovery. Longer requests recheck forecast coverage.
+    Optional humidity and meter inputs do not block temperature simulations.</p>
+  <ul class="room-checklist">
+    {% for check in readiness.checks %}
+    <li data-testid="readiness-{{ check.key }}" data-ready="{{ 'true' if check.ready else 'false' }}">
+      <div><strong>{{ check.label }}</strong> <span class="tag">{{ 'Ready' if check.ready else 'Needs attention' }}</span></div>
+      {% if not check.ready %}<small>{{ check.detail }}</small>{% endif %}
+      {% if p.can(check.cap) %}<a href="{{ check.href }}">{{ 'Review' if check.ready else 'Configure / review' }}</a>
+      {% elif not check.ready %}<small>Ask an Owner{{ ' / Admin' if check.cap == 'edit_comfort' else '' }} to review this input.</small>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p data-testid="simulation-readiness">Setback: <strong>{{ 'ready' if readiness.setback_ready else 'waiting for required inputs' }}</strong> ·
+    Tariff shifting: <strong>{{ 'ready' if readiness.tariff_ready else 'waiting for required inputs / distinct tariffs' }}</strong> ·
+    Simulated costs: <strong>{{ 'assumptions configured' if readiness.cost_ready else 'tariff / rated-power assumption needed' }}</strong>.</p>
+</section>
+<section class="card" data-testid="room-simulations">
+  <h3>Setback and tariff what-if tools</h3>
+  <p>Compare with the ideal-temperature baseline using the validated central thermal model and fresh forecast. Includes four hours of recovery. Results are SIMULATED; no automatic control.</p>
+  <div class="grid-2">
+  {% for scenario, label in [('setback', 'Compare setback'), ('tariff', 'Compare tariff shifting')] %}
+  <form data-room-simulation="api/rooms/{{ room|urlencode }}/what-if" data-units="{{ units }}" data-testid="simulation-{{ scenario }}">
+    <input type="hidden" name="scenario" value="{{ scenario }}">
+    {% if scenario == 'setback' %}<label>Setback ({{ units }} difference)<input type="number" name="setback_f" min="0" max="{{ 4 * 5 / 9 if units == 'C' else 4 }}" step="any" value="{{ setback * 5 / 9 if units == 'C' else setback }}" required></label>{% endif %}
+    <label>Compare for (hours, plus recovery)<input type="number" name="hours" value="4" min="1" max="8" step="1" required></label>
+    <button type="submit">{{ label }}</button>
+    <p class="errors"></p><div data-simulation-result role="status" aria-live="polite"></div>
+  </form>
+  {% endfor %}</div>
+</section>
+<section class="card" data-testid="schedule-suggestions">
+  <h3>Shared household schedule suggestions</h3>
+  <p>Requires five well-sampled days with at least 80% observed Away in a scheduled Home hour. Approval changes the shared household schedule, not just this room.</p>
+  {% for proposal in insights.suggestions %}
+  <p>{{ proposal.kind|title }} {{ '%02d'|format(proposal.hour) }}:00–{{ '%02d'|format(proposal.hour + 1) }}:00:
+    {{ '%.0f'|format(proposal.away_pct) }}% Away over {{ proposal.days }} days.</p>
+  {% if p.can('edit_comfort') %}
+  <form data-api="POST api/rooms/{{ room|urlencode }}/schedule-approval" data-reload
+    data-confirm="Approve an Away window in the shared household schedule? Existing safety controls and operation mode remain unchanged."
+    data-done="Schedule window approved" data-testid="schedule-approval">
+    <input type="hidden" name="suggestion_id" value="{{ proposal.id }}">
+    <input type="hidden" name="fingerprint" value="{{ insights.fingerprint }}">
+    <p class="errors"></p><button type="submit">Approve this schedule window</button>
+  </form>{% endif %}
+  {% else %}<p class="empty">No repeatable schedule mismatch with sufficient evidence.</p>{% endfor %}
+</section>
+<section class="card" data-testid="room-experiments">
+  <h3>Home-improvement experiments</h3>
+  <p>Compare 14-day windows before and after insulation, shading or maintenance. Requires five qualifying weather-comparable days in each window. Central runtime changes are not proof of savings caused by one room improvement.</p>
+  {% if p.can('edit_comfort') %}
+  <form data-api="POST api/rooms/{{ room|urlencode }}/experiments" data-reload data-done="Experiment recorded" data-testid="experiment-form">
+    <label>Improvement name<input name="name" maxlength="80" pattern="[a-zA-Z0-9 _\-]+" placeholder="Filter change" required></label>
+    <label>Change date<input type="date" name="change_day" value="{{ now|localtime('%Y-%m-%d') }}" required></label>
+    <p class="errors"></p><button type="submit">Record improvement</button>
+  </form>{% endif %}
+  {% for experiment in insights.experiments %}
+  <p><strong>{{ experiment.name }}</strong> · {{ experiment.change_day }}
+    {% if experiment.comparison.available %}· {{ '%.1f'|format(experiment.comparison.change_pct) }}% central runtime/DD change{% else %}· collecting comparable evidence{% endif %}</p>
+  {% if experiment.settings_changed %}<p class="banner">Settings changed after this experiment was recorded; do not attribute the result to the improvement alone.</p>{% endif %}
+  {% endfor %}
+</section>
+<script src="{{ up }}{{ asset('room_insights.js') }}" defer></script>
+{% endif %}
+{% if room_view == 'overview' %}
+<section id="weekly-room-actions" class="card" data-testid="weekly-room-actions">
+  <h3>Weekly room action report</h3>
+  <p>{{ insights.week_start|localtime('%b %d') }}–{{ insights.week_end|localtime('%b %d') }} · ranked by evidence and comfort impact, not guaranteed savings.</p>
+  <ol>{% for action in insights.actions %}<li><strong>{{ action.title }}</strong><br><small>{{ action.evidence }}</small></li>
+  {% else %}<li>No actionable issue detected in the available evidence. This is not certification of efficiency.</li>{% endfor %}</ol>
+</section>
+{% endif %}

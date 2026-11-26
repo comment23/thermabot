@@ -1,34 +1,110 @@
 {% extends "base.html" %}
 {% block title %}My Room{% endblock %}
 {% block content %}
+{% macro interval_temp(value) %}{{ (value|round(1) if value is number else none)|temp(units) }}{% endmacro %}
 <h2>{{ room or 'My Room' }}</h2>
-{% if rooms %}<nav class="seg" aria-label="Rooms"><ul>{% for r in rooms %}<li><a href="room?room={{ r }}"{% if r == room %} aria-current="page"{% endif %}>{{ r }}</a></li>{% endfor %}</ul></nav>{% endif %}
+{% if rooms %}<nav class="seg room-picker" aria-label="Rooms"><ul>{% for r in rooms %}<li><a href="room?room={{ r|urlencode }}&amp;range={{ report.range if report else '24h' }}&amp;view={{ room_view }}"{% if r == room %} aria-current="page"{% endif %}>{{ r }}</a></li>{% endfor %}</ul></nav>{% endif %}
 {% if not room %}<p class="empty" data-testid="no-room">No room is assigned to your account. Ask an Owner to set one.</p>
 {% else %}
-<p class="card" data-testid="reading">{% if reading and reading.temp is not none %}<strong>{{ reading.temp|temp(units) }}</strong>
-  {% if reading.estimated %}<span class="est">(estimated)</span>{% endif %}{% if reading.stale %} <span class="stale">(stale)</span>{% endif %}
-  {% else %}No reading yet.{% endif %}</p>
-<section class="card" data-testid="active-nudges"><h3>Active nudge</h3>
-{% for i, n in active %}<p data-testid="nudge">{{ n.delta_f|temp(units, true) }} until {{ n.expires_at|localtime }}
-  <button class="secondary outline" data-api="DELETE api/nudge/{{ i }}" data-done="Nudge cancelled" data-reload
-    data-testid="nudge-cancel">Cancel</button></p>
-{% else %}<p>None.</p>{% endfor %}
+{% if floor %}<p class="muted">{{ floor }}</p>{% endif %}
+<section class="card room-summary" data-testid="room-summary">
+  <div class="card-head"><h3>Room at a glance</h3><span class="tag">Room measurements</span></div>
+  <dl class="hero-stats">
+    <div><dt>Current temperature</dt><dd data-testid="reading">{% if readiness.current_f is not none %}{{ readiness.current_f|temp(units) }}
+      {% elif reading and reading.stale %}<small class="stale">Reading is stale; current temperature unavailable.</small>
+      {% elif reading and reading.temp is not none %}{{ reading.temp|temp(units) }}<small>{{ 'estimated, not measured' if reading.estimated else 'age unknown / stale; not used in comparisons' }}</small>
+      {% else %}<small>No reading yet.</small>{% endif %}</dd></div>
+    <div><dt>Difference from ideal</dt><dd data-testid="room-ideal-delta">{{ (readiness.current_f - insights.ideal_f)|temp(units, true) if readiness.current_f is not none else '—' }}</dd></div>
+    <div><dt>Within ideal band · last 7 days</dt><dd data-testid="room-ideal-comfort">{{ ('%.1f'|format(insights.ideal_pct)) ~ '%' if insights.ideal_pct is not none else '—' }}</dd></div>
+  </dl>
+  <p data-testid="ideal-temperature">Ideal reference: <strong>{{ insights.ideal_f|temp(units) }}</strong> · band {{ (insights.ideal_f - insights.tolerance_f)|temp(units) }}–{{ (insights.ideal_f + insights.tolerance_f)|temp(units) }}.
+    This analysis reference does not change active thermostat comfort bands.</p>
+  <p class="muted">Ideal-band comfort covers fresh measured minutes in the last 7 days, not the selected history range.</p>
+  <p data-testid="room-priority-action">{% if insights.actions %}<strong>Top action: {{ insights.actions[0].title }}</strong><br><small>{{ insights.actions[0].evidence }}</small>
+    {% else %}No actionable issue detected in the available evidence. This is not certification of efficiency.{% endif %}
+    <a href="room?room={{ room|urlencode }}&amp;range={{ report.range }}&amp;view=overview#weekly-room-actions">View weekly actions</a>.</p>
+  <p><a href="room?room={{ room|urlencode }}&amp;range={{ report.range }}&amp;view=tools#room-setup">Setup checklist: {{ readiness.ready_count }}/{{ readiness.total }} inputs ready</a>
+    <small>Some inputs are optional.</small>
+    {% if p.can('edit_comfort') %} · <a href="settings/advanced#f-insights-ideal_temp_f">Edit ideal reference and tariffs</a>{% endif %}</p>
 </section>
-{% if can_nudge %}
-<section class="card"><h3>Nudge</h3>
-<p data-testid="limits"><small>±{{ cfg.max_delta_f|temp(units) }} for up to {{ cfg.max_hours|num }} h ·
-  {{ used }} of {{ cfg.per_day }} used today</small></p>
-<form data-api="POST api/nudge" data-done="Nudged; replanning" data-reload data-testid="nudge-form">
-  {% if rooms %}<input type="hidden" name="room" value="{{ room }}">{% endif %}
-  <div class="grid">
-    <label>Change <select name="delta_f" data-testid="delta">{% for d in [-2, -1, 1, 2] if d|abs <= cfg.max_delta_f %}
-      <option value="{{ d }}"{% if d == 1 %} selected{% endif %}>{{ d|temp(units, true) }}</option>{% endfor %}</select></label>
-    <label>For <select name="hours" data-testid="hours">{% for h in range(1, (cfg.max_hours|int) + 1) %}
-      <option value="{{ h }}"{% if h == 2 %} selected{% endif %}>{{ h }} h</option>{% endfor %}</select></label>
-  </div>
-  <p class="errors" data-testid="errors"></p>
-  <button type="submit" data-testid="nudge-submit"{% if used >= cfg.per_day %} disabled{% endif %}>Nudge</button>
-</form></section>
+<details class="section" data-testid="room-nudge-controls"{% if active %} open{% endif %}>
+  <summary>Adjust room · Nudges{% if active %} ({{ active|length }} active){% endif %}</summary>
+  {% include "partials/room_nudges.html" %}
+</details>
+<nav class="seg room-tabs" aria-label="Room sections" data-testid="room-tabs"><ul>
+  {% for key, label in [('overview', 'Overview'), ('temperatures', 'Temperatures'), ('efficiency', 'Efficiency'), ('tools', 'Tools')] %}
+  <li><a href="room?room={{ room|urlencode }}&amp;range={{ report.range }}&amp;view={{ key }}"{% if room_view == key %} aria-current="page"{% endif %}>{{ label }}</a></li>
+  {% endfor %}
+</ul></nav>
+<nav class="seg" aria-label="Room history range" data-testid="room-range"><ul>
+  {% for key, label in [('24h', '24 h'), ('7d', '7 days'), ('30d', '30 days')] %}
+  <li><a href="room?room={{ room|urlencode }}&amp;range={{ key }}&amp;view={{ room_view }}"{% if key == report.range %} aria-current="page"{% endif %}>{{ label }}</a></li>
+  {% endfor %}
+</ul></nav>
+<p class="muted" data-testid="room-period-label">Selected history: {{ range_label }} (room statistics, temperatures and scheduled-band indicators).
+  Weekly diagnostics always use the last 7 days. Weather comparisons use two completed 14-day windows.</p>
+{% if room_view == 'overview' %}
+<section id="room-insights" class="card" data-testid="room-insights">
+  <h3>Room insights · {{ range_label }}</h3>
+  {% if report.measured %}
+  <dl class="hero-stats">
+    <div><dt>Average</dt><dd data-testid="room-mean">{{ report.mean|temp(units) }}</dd></div>
+    <div><dt>Lowest</dt><dd>{{ report.low|temp(units) }}</dd></div>
+    <div><dt>Highest</dt><dd>{{ report.high|temp(units) }}</dd></div>
+  </dl>
+  <ul>
+    {% if report.offset is not none %}<li data-testid="room-offset">Average difference from the thermostat: <strong>{{ report.offset|temp(units, true) }}</strong> during paired measurements. Positive means this room was warmer.</li>{% endif %}
+    {% if report.change is not none %}<li data-testid="room-trend">Latest {{ report.interval_h }} h interval versus the previous interval: <strong>{{ report.change|temp(units, true) }}</strong>.</li>
+    {% else %}<li>Not enough recent measurements to compare consecutive intervals.</li>{% endif %}
+    {% if report.coverage_pct < 80 %}<li class="banner" data-testid="room-low-coverage">Limited coverage: conclusions describe sampled minutes, not the entire period.</li>{% endif %}
+    {% if report.outside_min %}<li>{{ report.outside_min }} measured minutes outside the reference comfort band. Check sensor placement, drafts and airflow before changing settings.</li>{% endif %}
+  </ul>
+  {% else %}<p class="empty" data-testid="room-history-empty">No fresh measured temperatures in this range yet. Missing, stale and estimated readings are not measurements.</p>{% endif %}
+  <p class="muted" data-testid="room-coverage">{{ report.measured }} measured minutes · {{ '%.1f'|format(report.coverage_pct) }}% coverage of the selected period · {{ report.stale }} stale / unknown-age readings · {{ report.missing }} missing readings.</p>
+</section>
 {% endif %}
+{% if room_view == 'temperatures' %}
+<section id="room-temperatures" class="card" data-testid="room-temperatures">
+  <h3>Room temperatures · {{ range_label }}</h3>
+  <p class="muted">{{ report.interval_h }} h intervals, newest first · {{ timezone }} · measured temperatures only. Outdoor values may use the forecast fallback.</p>
+  <figure class="chart-card">
+    <div class="chart" data-chart="room" data-src="room-temperature-data" data-testid="room-temperature-chart" role="img"
+      aria-label="Measured room and thermostat interval temperatures with the ideal reference band. Missing intervals remain gaps."></div>
+    <noscript><p class="muted">The chart requires JavaScript. The temperature table below remains available.</p></noscript>
+    <script type="application/json" id="room-temperature-data">{{ room_chart|tojson }}</script>
+    <figcaption class="key">Room measurements · thermostat measurements · dashed ideal {{ insights.ideal_f|temp(units) }} · shaded {{ (insights.ideal_f - insights.tolerance_f)|temp(units) }}–{{ (insights.ideal_f + insights.tolerance_f)|temp(units) }} reference.
+      Points are interval means, not instantaneous readings; missing intervals remain gaps. The table below is the accessible alternative.</figcaption>
+  </figure>
+  <details class="fallback" open><summary>Show interval temperatures</summary>
+  <table class="cards room-temperature-table" data-testid="room-temperature-table">
+    <thead><tr><th>Interval</th><th>Room mean</th><th>Low / high</th><th>Thermostat</th><th>Outdoor</th><th>Data quality</th></tr></thead>
+    <tbody>{% for row in report.rows|reverse %}<tr data-testid="room-temperature-row">
+      <td>{{ row.start|localtime('%b %d %H:%M') }} – {{ row.end|localtime('%b %d %H:%M') }}</td>
+      <td data-label="Room mean">{{ interval_temp(row.temp) }}</td>
+      <td data-label="Low / high">{{ interval_temp(row.low|default(none)) }} / {{ interval_temp(row.high|default(none)) }}</td>
+      <td data-label="Thermostat">{{ interval_temp(row.indoor|default(none)) }}</td>
+      <td data-label="Outdoor">{{ interval_temp(row.outdoor|default(none)) }}</td>
+      <td data-label="Data quality">{% if row.samples %}{{ row.measured }} measured / {{ report.interval_h * 60 }} min{% if row.stale or row.missing %}; {{ row.stale }} stale, {{ row.missing }} missing{% endif %}{% else %}No samples{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></details>
+</section>
+{% endif %}
+{% if room_view == 'efficiency' %}
+<section id="room-efficiency" class="card" data-testid="room-efficiency">
+  <h3>Room comfort indicators · {{ range_label }}</h3>
+  <p class="muted">Comfort performance, not measured room energy efficiency.</p>
+  <dl class="hero-stats">
+    <div><dt>Within scheduled reference band</dt><dd data-testid="room-comfort">{{ ('%.1f'|format(report.comfort_pct)) ~ '%' if report.comfort_pct is not none else '—' }}</dd></div>
+    <div><dt>Outside band</dt><dd>{{ report.outside_min|num }} <small>min</small></dd></div>
+    <div><dt>Mean excursion</dt><dd data-testid="room-excursion">{{ report.excursion|temp(units, true) }}</dd></div>
+  </dl>
+  <p>Based on {{ report.assessed }} measured minutes with a recorded schedule block. Mean excursion is distance outside the band, including zero for minutes inside.</p>
+  <p class="muted" data-testid="room-band-method">Reference bands use current saved comfort settings, this room's tolerance, the recorded schedule block and the current {{ season }} season. Historical configuration, weather changes, humidity adjustments and nudges are not reconstructed.</p>
+  <p class="muted">This scheduled-band percentage is separate from the ideal-band percentage in the summary.</p>
+  <p data-testid="room-runtime">Central HVAC observed during this room's measured minutes: heating <strong>{{ report.heat_min|num }} min</strong>, cooling <strong>{{ report.cool_min|num }} min</strong>. These are whole-system observations, not this room's runtime, kWh or savings.</p>
+  <p><a href="efficiency">View whole-home weather-normalized efficiency and simulated savings</a>. Actual room energy use requires independently attributable metering; passive equipment assignments do not provide it.</p>
+</section>
+{% endif %}
+{% include "partials/room_insights.html" %}
 {% endif %}
 {% endblock %}

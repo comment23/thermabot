@@ -30,6 +30,9 @@
       <option value="missing-room">Unavailable study sensor</option>
       <option value="away">Away: normal presence grace periods apply</option>
       <option value="ha-outage">Home Assistant outage</option>
+      <option value="room-evidence">Room evidence: 73 F, 65% RH, dedicated meter (stopped replay)</option>
+      <option value="room-history">Qualified history: 10 simulated weekdays, weather/cycling/Away (stopped)</option>
+      <option value="room-model">Model history: 3 simulated days of physical thermal steps (stopped)</option>
     </select>
     <button type="submit">Apply scenario and sample now</button>
   </form>
@@ -37,6 +40,15 @@
   <h2>Live runtime evidence</h2>
   <p>Device reports stay fresh on each normal 60-second tick. Faults persist until you choose
     Healthy. Saved settings and accounts survive restart; use a new data directory to reset.</p>
+  <p>Room evidence replays three simulated minutes while stopped. Map
+    <code>sensor.study_humidity</code> and <code>sensor.study_energy</code> in Home &amp; rooms.
+    This is not live history, savings evidence, or a Watch/soak shortcut.</p>
+  <p>Qualified history replays five completed weekdays in each 14-day weather window,
+    including observed Away hours and explicit equipment states. Map central auxiliary heat
+    to <code>binary_sensor.living_room_auxiliary_heat</code> in HA settings. Model history
+    replays three days from a known physical thermal fixture; use Model &gt; Refit now
+    to fit and validate it normally. These longer replays can take several minutes.
+    Starting Watch is blocked until they finish; none of their minutes are a live soak.</p>
   <pre id="evidence" tabindex="0"></pre>
   <h2>Customer checklist</h2>
   <ol>
@@ -46,6 +58,18 @@
     <li>Watch/Stop: no thermostat service calls; review Control blockers without enabling it.</li>
     <li>Apply Celsius, stale, unavailable and outage scenarios; confirm the dashboard recovers.</li>
     <li>Sign in as Member; privileged Settings and user management must be inaccessible.</li>
+    <li>Comfort: review the 73 F ideal, keyboard slider and Home/Sleep rooms; cancel, edit,
+      preview again and apply. Confirm the next real tick uses the saved bands without starting Control.</li>
+    <li>Room tabs: compare summary, measured temperatures, meter/humidity evidence and readiness;
+      missing model or multi-day evidence must remain explicitly unavailable.</li>
+    <li>Record an improvement, reload and verify persistence. Schedule changes still require
+      approval; simulated tools must never write to the thermostat.</li>
+    <li>Qualified history: review weather/disagreement/cycling actions, cancel and approve
+      a repeatable Away hour, and reject another tab's stale approval. Compare an improvement
+      dated between the two windows; later settings changes must be disclosed.</li>
+    <li>Model history: fit via Model, configure tariffs/rated power in Advanced, and review
+      baseline/proposed results including recovery. Flat tariffs must remain unavailable
+      for shifting; no comparison changes settings or writes climate services.</li>
   </ol>
 </main>
 <script>

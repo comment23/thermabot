@@ -125,6 +125,8 @@ class ScheduleCfg(BaseModel):
 
 class RoomCfg(BaseModel):
     temp: str
+    humidity: str = Field(default="", pattern=r"^(sensor\.[a-z0-9_]+)?$")
+    energy: str = Field(default="", pattern=r"^(sensor\.[a-z0-9_]+)?$")
     floor: str = Field(default="", max_length=64, pattern=r"^[a-zA-Z0-9 _-]*$")
     devices: list[str] = Field(default_factory=list)
     tol: float = Field(default=0, ge=0)
@@ -353,6 +355,38 @@ class SensorsCfg(BaseModel):
     compressor: str = Field(default="", pattern=_ENTITY)
     outdoor: str = Field(default="", pattern=_ENTITY)
     humidity: str = Field(default="", pattern=_ENTITY)
+    energy: str = Field(default="", pattern=r"^(sensor\.[a-z0-9_]+)?$")
+    power: str = Field(default="", pattern=r"^(sensor\.[a-z0-9_]+)?$")
+    auxiliary_heat: str = Field(default="", pattern=r"^((binary_sensor|sensor)\.[a-z0-9_]+)?$")
+
+
+class InsightsCfg(BaseModel):
+    """Read-only analysis reference and explicitly configured energy assumptions."""
+
+    ideal_temp_f: float = Field(default=73, ge=50, le=85, allow_inf_nan=False)
+    tolerance_f: float = Field(default=1, ge=0.1, le=5, allow_inf_nan=False)
+    setback_f: float = Field(default=2, ge=0, le=4, allow_inf_nan=False)
+    meter_stale_min: float = Field(default=15, ge=1, le=1440, allow_inf_nan=False)
+    rated_power_kw: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    off_peak_rate: float | None = Field(default=None, ge=0, le=10, allow_inf_nan=False)
+    peak_rate: float | None = Field(default=None, ge=0, le=10, allow_inf_nan=False)
+    peak_start_hour: int = Field(default=16, ge=0, le=23)
+    peak_end_hour: int = Field(default=21, ge=1, le=24)
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+
+    @model_validator(mode="after")
+    def _tariff(self) -> InsightsCfg:
+        if (self.off_peak_rate is None) != (self.peak_rate is None):
+            raise ValueError("configure both off-peak and peak rates, or neither")
+        if self.peak_start_hour >= self.peak_end_hour:
+            raise ValueError("peak hours must be a non-overnight interval with start before end")
+        if (
+            self.peak_rate is not None
+            and self.off_peak_rate is not None
+            and self.peak_rate < self.off_peak_rate
+        ):
+            raise ValueError("peak rate must be at least the off-peak rate")
+        return self
 
 
 class OpeningSensorCfg(BaseModel):
@@ -445,6 +479,7 @@ class Settings(BaseModel):
     weather: WeatherCfg = Field(default_factory=WeatherCfg)
     presence: PresenceCfg = Field(default_factory=PresenceCfg)
     metrics: MetricsCfg = Field(default_factory=MetricsCfg)
+    insights: InsightsCfg = Field(default_factory=InsightsCfg)
     alerts: AlertsCfg = Field(default_factory=AlertsCfg)
     summary: SummaryCfg = Field(default_factory=SummaryCfg)
     sensors: SensorsCfg = Field(default_factory=SensorsCfg)  # v0.3.0

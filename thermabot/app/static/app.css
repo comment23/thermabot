@@ -281,6 +281,40 @@ figure.chart-card { margin: 0 0 var(--tb-space-3); }
 .chart-tip i { display: inline-block; width: .7em; height: .7em; margin-right: .35em; border-radius: 2px;
   font-style: normal; vertical-align: baseline; }
 figcaption.key { font-size: var(--tb-font-sm); color: var(--tb-text-muted); margin-top: var(--tb-space-1); }
+
+/* Room views keep quick controls outside the selected section. */
+.room-summary .hero-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.room-summary dd small { display: block; font-size: var(--tb-font-xs); font-weight: 400; }
+.room-picker ul { flex-wrap: wrap; }
+nav.room-tabs ul { width: 100%; }
+nav.room-tabs li { flex: 1; min-width: 0; }
+nav.room-tabs a { justify-content: center; padding-inline: 8px; font-size: var(--tb-font-sm); }
+.room-checklist { padding-left: 0; list-style: none; }
+.room-checklist li { padding-block: var(--tb-space-3); border-bottom: 1px solid var(--tb-line); }
+.room-checklist small { display: block; margin-block: var(--tb-space-1); }
+main .room-temperature-table { display: table; width: 100%; table-layout: fixed;
+  white-space: normal; overflow: visible; }
+.room-temperature-table th, .room-temperature-table td { overflow-wrap: anywhere; }
+.preference-labels { display: flex; justify-content: space-between; gap: var(--tb-space-2); font-weight: 600; }
+.preference-rooms label { display: block; min-height: var(--tb-tap); overflow-wrap: anywhere; }
+[data-simple-preferences] input[type="range"] { width: 100%; min-height: var(--tb-tap); }
+[data-simple-preferences] [hidden] { display: none; }
+main .simulation-comparison { display: table; width: 100%; table-layout: fixed;
+  white-space: normal; overflow: visible; font-size: var(--tb-font-sm); }
+.simulation-comparison th:first-child { width: 44%; }
+.simulation-comparison caption { text-align: left; margin-block: var(--tb-space-3); }
+.simulation-comparison td span { display: block; }
+.simulation-comparison meter { display: block; width: 100%; height: 12px; accent-color: var(--tb-accent); }
+@media (max-width: 600px) {
+  main .simulation-comparison, .simulation-comparison caption, .simulation-comparison tbody { display: block; width: 100%; }
+  .simulation-comparison thead { display: none; }
+  .simulation-comparison tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: var(--tb-space-3); border: 1px solid var(--tb-line); border-radius: var(--tb-radius-sm); }
+  .simulation-comparison th:first-child { grid-column: 1 / -1; width: 100%; }
+  .simulation-comparison th, .simulation-comparison td { display: block; min-width: 0; border: 0; padding: var(--tb-space-2); }
+  .simulation-comparison td::before { content: attr(data-label); display: block; color: var(--tb-text-muted);
+    font-weight: 600; margin-bottom: var(--tb-space-1); }
+}
 .key i { display: inline-block; width: .9rem; height: .55rem; margin: 0 .25rem 0 .6rem; vertical-align: middle;
   border-radius: 2px; }
 .key i.heat { background: var(--tb-heat); opacity: .55; }
@@ -401,6 +435,8 @@ dl.review dd { margin: 0; overflow-wrap: anywhere; }
   table.cards td:not([data-label]):not(:first-child) { grid-column: 2; grid-row: 1; justify-content: flex-end; }
   table.cards td:last-child:empty { display: none; }
   table.cards td[colspan] { grid-column: 1 / -1; }
+  table.room-temperature-table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-temperature-table td { min-width: 0; flex-wrap: wrap; }
   .room-row, .person-row { grid-template-columns: auto 1fr; }
   .room-row [data-r="temp"], .room-row [data-r="floor"], .person-row [data-p="companion"],
   .person-row [data-p="life360"] { grid-column: 1 / -1; }

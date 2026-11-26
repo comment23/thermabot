@@ -89,18 +89,20 @@ def srv(lab: Lab) -> Iterator[Srv]:
         yield server
 
 
+def record_evidence(page: Page, lab: Lab, request: pytest.FixtureRequest, name: str) -> None:
+    output: Path | None = request.config.getoption("--uat-artifacts")
+    if output is not None:
+        output.mkdir(parents=True, exist_ok=True)
+        name = re.sub(r"[^A-Za-z0-9_-]", "_", name)
+        page.screenshot(path=str(output / f"{name}.png"), full_page=True)
+        (output / f"{name}.json").write_text(json.dumps(lab.evidence(), indent=2), encoding="utf-8")
+
+
 @pytest.fixture
 def page(browser: Browser, srv: Srv, lab: Lab, request: pytest.FixtureRequest) -> Iterator[Page]:
     with customer_page(browser, srv) as page:
         yield page
-        output: Path | None = request.config.getoption("--uat-artifacts")
-        if output is not None:
-            output.mkdir(parents=True, exist_ok=True)
-            name = re.sub(r"[^A-Za-z0-9_-]", "_", request.node.name)
-            page.screenshot(path=str(output / f"{name}.png"), full_page=True)
-            (output / f"{name}.json").write_text(
-                json.dumps(lab.evidence(), indent=2), encoding="utf-8"
-            )
+        record_evidence(page, lab, request, request.node.name)
         evidence = lab.evidence()
         assert evidence["run_mode"] == "shadow"
         assert evidence["climate_service_calls"] == []

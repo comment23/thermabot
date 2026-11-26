@@ -20,7 +20,7 @@ def _configured(srv: Srv) -> None:
 def test_weather_aware_settings_round_trip_in_celsius(page: Page, srv: Srv) -> None:
     _configured(srv)
     login(page, srv, "alex")
-    page.goto(f"{srv.url}/settings")
+    page.goto(f"{srv.url}/settings/advanced")
     page.locator("[data-testid=section-seasonal_control] summary").click()
     expect(page.locator("[data-path='seasonal_control.home.0']")).to_have_value("21.1")
     expect(page.locator("[data-path='seasonal_control.sleep.1']")).to_have_value("21.1")

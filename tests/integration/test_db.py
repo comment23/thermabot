@@ -20,14 +20,14 @@ def test_fresh_db_kill_switch_off(tmp_path: Path) -> None:
     p = db.read_bot_state(conn)
     assert p is not None and p.kill_switch == "off"
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4  # 004_efficiency (v0.5.0)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5  # 005_room_experiments
 
 
 @pytest.mark.brd("FR-MODE-2")
 def test_migrate_is_idempotent(tmp_path: Path) -> None:
     db.open_db(tmp_path / "t.db", now=T0).close()
     conn = db.open_db(tmp_path / "t.db", now=T0)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     assert conn.execute("SELECT COUNT(*) FROM bot_state").fetchone()[0] == 1
 
 

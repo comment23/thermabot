@@ -12,12 +12,14 @@ over convenience.
 
 | Channel | Version | Status |
 |---|---|---|
+| Application | 0.7.0 | Room tools and simplified settings; distributed as a prerelease, not stable/live acceptance |
 | Stable | v0.6.7 | Historical release retained in the private archive; its history is not copied here |
-| Add-on prerelease | [0.6.8-rc.12](CHANGELOG.md#068-rc12---2026-11-26-prerelease) | UAT fixes; images publish from `main` after CI; stable release remains blocked on the live soak and Owner review |
-| GitHub prerelease | [v0.6.8-rc.11](CHANGELOG.md#068-rc11---2026-11-25-prerelease) | Latest versioned GitHub release; rc.12 source/image publication does not create a new tag or GitHub release |
+| Add-on prerelease | [0.7.0-rc.1](CHANGELOG.md#070-rc1---2026-11-26-prerelease) | Images publish after CI; stable release remains blocked on the live soak and Owner review |
+| GitHub prerelease | [v0.7.0-rc.1](https://github.com/comment23/thermabot/releases/tag/v0.7.0-rc.1) | Versioned prerelease; see [release notes](CHANGELOG.md#070-rc1---2026-11-26-prerelease) and [scoped UAT evidence](docs/uat-0.7.0.md) |
 
 Wait for successful `addon-publish` and anonymous image-resolution checks before installing
-the catalog update. The application version remains `0.6.8`; updating does not enable Control.
+the catalog update. This source uses application `0.7.0` and add-on prerelease
+`0.7.0-rc.1`. Updating does not enable Control or certify the pending live acceptance.
 
 For privacy, this repository starts with one history-free source snapshot. Earlier private
 release tags, GitHub discussions, and CI artifacts remain in the private archive and are not
@@ -55,6 +57,8 @@ contributing.
 ## Features
 
 - Home Assistant setup wizard for thermostat, sensors, presence, comfort bands, and weather.
+- Preview-first Simple settings with a 73 F ideal reference, comfort/efficiency slider and
+  important rooms; technical tuning remains in Advanced. See [Simple settings](docs/setup.md#simple-settings).
 - Explainable schedule, comfort, and HVAC status pages with SHADOW-first control safeguards.
 - Optional weather-aware home/sleep comfort bands with indoor-temperature correction and
   guarded heating/cooling mode selection; see [weather.md](docs/weather.md#weather-aware-comfort).
@@ -67,6 +71,12 @@ contributing.
   exterior-door/garage SHADOW assessment.
 - Visual floor and room management with named sensor selection and passive equipment
   inventory, plus explicit Start/Stop controls and separate Control-readiness review.
+- Room-specific insights, temperature tables and read-only comfort-performance indicators
+  for 24-hour, 7-day and 30-day periods; see [measurement limits](docs/efficiency.md#room-insights-temperature-table-and-efficiency-indicators).
+- A configurable 73 F ideal reference, sensor and humidity diagnostics, explicit meter/cost
+  reporting, weather-adjusted alerts, model-backed setback/tariff comparisons, reviewed
+  schedule suggestions, improvement experiments and weekly room actions. These do not
+  enable Control; see [research features and setup](docs/efficiency.md#using-the-research-features).
 
 Schedules, daily history, rate limits and local UI times use one zone: `TZ` when it is
 set to a real IANA name, otherwise Home Assistant's configured `time_zone`, otherwise UTC.
@@ -96,7 +106,7 @@ token is not required for the same Home Assistant instance.
 
 The add-on supports **amd64** and **aarch64**. Home Assistant pulls a prebuilt image
 (`ghcr.io/comment23/thermabot-addon-amd64` or `ghcr.io/comment23/thermabot-addon-aarch64`,
-tag `0.6.8-rc.11`) and does not compile the add-on on the device. CI publishes those images
+tag matching the add-on catalog version) and does not compile the add-on on the device. CI publishes those images
 from the default branch. A git tag is not required to install. Wait until that publish
 succeeds, and until the packages are public, before installing or updating. Bump the
 add-on `version` to ship a later image; Home Assistant will not re-pull an existing tag.
@@ -104,8 +114,8 @@ The separate plain image (`ghcr.io/comment23/thermabot-dev`) stays **amd64** and
 only for `v*` tags. Compose does not use it.
 
 The public source snapshot is a prerelease, not a stable production release. The in-app
-version is the application version (`0.6.8`); the Home Assistant add-on catalog marks
-this build as `0.6.8-rc.11`. See [first-run setup](docs/setup.md) for the wizard and
+version is the application version (`0.7.0`); this source targets the unpublished Home
+Assistant add-on candidate `0.7.0-rc.1`. See [first-run setup](docs/setup.md) for the wizard and
 operating details.
 
 ### Docker Compose (fallback)

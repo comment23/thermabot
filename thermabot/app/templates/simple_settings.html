@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Comfort{% endblock %}
+{% block content %}
+<div class="page-head"><h2>What matters most?</h2><p>Simple comfort preferences</p></div>
+<p class="banner">Nothing changes until you preview and apply. Saving never starts Active control.
+  If Active is already enabled, future guarded decisions will use the saved preferences.</p>
+{% if not p.can('edit_safety') %}<p data-testid="safety-note">Safety limits and thermostat assignments remain Owner-only.</p>{% endif %}
+<section class="card" data-testid="simple-connections">
+  <h3>First, confirm the essentials</h3>
+  <p>Thermostat: {{ 'configured' if settings.thermostat.configured else 'not configured' }} ·
+    HVAC sensors: {{ 'needs configuration' if settings.sensors_missing or not settings.thermostat.configured else 'configured' }}.</p>
+  <p>Temperature sensors are required for important rooms. Humidity, energy meters and tariffs are optional.</p>
+  <div class="actions">
+    {% if p.can('edit_safety') %}<a href="{{ up }}setup" role="button" class="secondary outline" data-testid="open-wizard">Confirm equipment and sensors</a>
+    {% else %}<small>Ask an Owner to confirm the thermostat and HVAC sensors.</small>{% endif %}
+    <a href="{{ up }}settings/people">Review Home &amp; rooms</a>
+  </div>
+</section>
+<form data-simple-preferences data-units="{{ units }}" data-ideal-f="{{ settings.insights.ideal_temp_f }}"
+  data-fingerprint="{{ preference_fingerprint }}" data-flexibility='{{ flexibility|tojson }}' data-testid="simple-preferences">
+  <section class="card">
+    <h3>1. Your ideal temperature</h3>
+    <label>Ideal temperature (°{{ units }})
+      <input type="number" name="ideal_f" step="any" required
+        value="{{ ideal_display }}" data-testid="simple-ideal"></label>
+    <p class="muted">Prefilled from your saved ideal reference (73°F by default). Display units can be changed in Advanced.</p>
+  </section>
+  <section class="card">
+    <h3>2. Choose comfort or efficiency</h3>
+    <label for="comfort-priority">Your priority</label>
+    <input type="range" id="comfort-priority" name="priority" min="0" max="2" step="1"
+      value="{{ 0 if priority == 'comfort' else 2 if priority == 'efficiency' else 1 }}"
+      aria-describedby="priority-description" data-testid="simple-priority">
+    <div class="preference-labels" aria-hidden="true"><span>Comfort</span><span>Balanced</span><span>Efficiency</span></div>
+    <p id="priority-description" data-testid="priority-description" role="status"></p>
+    <p data-testid="saved-priority">Saved configuration: <strong>{{ priority|title if priority else 'Custom (preserved)' }}</strong>.
+      {% if not priority %}Balanced is only a starting suggestion; your custom ranges and weights are unchanged until you apply.{% endif %}</p>
+    <p class="muted">The slider chooses a shared Home/Sleep reference range, not a hard room-temperature limit or a savings percentage.
+      Existing room tolerances, comfort scoring and all safety guards still apply.</p>
+  </section>
+  <section class="card">
+    <h3>3. Which rooms are important?</h3>
+    <p>Selected rooms share equal influence. Other rooms retain their readings and safety checks.
+      Home and Sleep follow your existing schedule; Away settings are unchanged.</p>
+    <div class="grid-2">
+      {% for block, label, selected in [('home', 'Home / daytime', home_rooms), ('sleep', 'Sleep / nighttime', sleep_rooms)] %}
+      <fieldset class="preference-rooms"><legend>{{ label }}</legend>
+      {% for key, room in settings.rooms|dictsort %}
+        <label><input type="checkbox" name="{{ block }}_rooms" value="{{ key }}"{% if key in selected %} checked{% endif %}>
+          {{ key|replace('_', ' ')|title }}{% if room.floor %} <small>· {{ room.floor }}</small>{% endif %}
+          {% if not room.temp %}<small>· temperature sensor needed</small>{% endif %}</label>
+      {% endfor %}
+      </fieldset>
+      {% endfor %}
+    </div>
+    <label><input type="checkbox" name="confirmed_mappings" required data-testid="simple-confirm-mappings">
+      I have confirmed the thermostat and selected rooms' temperature sensor assignments.</label>
+    <p class="muted">Select at least one room in each group and confirm the assignments before previewing.</p>
+  </section>
+  <p class="errors" data-testid="simple-errors" role="alert"></p>
+  <button type="submit" data-testid="simple-preview" disabled>Preview recommendation</button>
+  <noscript><p>Simple preferences require JavaScript for preview and approval. Existing settings remain unchanged;
+    use <a href="{{ up }}settings/advanced">Advanced settings</a> instead.</p></noscript>
+  <section class="card" data-testid="simple-preview-result" hidden aria-live="polite"></section>
+  <button type="button" data-testid="simple-apply" hidden disabled>Apply reviewed preferences</button>
+</form>
+<section class="card">
+  <h3>Thermabot handles the planning</h3>
+  <p>With reliable readings, a fresh forecast and a validated model, the existing planner seeks less runtime
+    within your comfort preferences. Without sufficient evidence, it uses the existing guarded fallback;
+    wider ranges do not guarantee energy or cost savings.</p>
+  <p>Model: {{ model_label }} · forecast: {{ 'needs attention' if weather_stale else 'available' }}.</p>
+  <div class="actions"><a href="{{ up }}plan">Review the plan</a><a href="{{ up }}efficiency">Review efficiency evidence</a>
+    <a href="{{ up }}settings/schedule">Review the household schedule</a></div>
+  <p class="muted">Schedule suggestions still require approval. Meter-backed costs and tariff-shifting what-if tools
+    do not automatically control the thermostat.</p>
+</section>
+<details class="section" data-testid="simple-advanced">
+  <summary>Optional inputs and Advanced settings</summary>
+  <p><a href="{{ up }}settings/advanced">Open Advanced</a> for custom bands, display units, numeric comfort settings,
+    nudges, overrides, model tuning, tariffs and reporting. <a href="{{ up }}settings/people">Home &amp; rooms</a>
+    keeps optional humidity sensors and dedicated energy meters.</p>
+  {% if p.can('edit_safety') %}<p><a href="{{ up }}settings/ha">Home Assistant sensors and weather</a> ·
+    <a href="{{ up }}settings/safety">Owner safety and control review</a>.</p>{% endif %}
+</details>
+<script src="{{ up }}{{ asset('preferences.js') }}" defer></script>
+{% endblock %}
