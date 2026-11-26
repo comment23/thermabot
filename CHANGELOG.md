@@ -22,6 +22,8 @@ The live SHADOW soak and Owner-review gates remain required; updating never enab
   always-accessible nudges, linked setup readiness, a temperature/reference-band chart and
   baseline/proposed simulation comparisons. Preserve room access, CSRF and the sole
   controller write path; central HVAC observations are not assigned to individual rooms.
+- Keep room temperature tables within their cards in Celsius and with enlarged text,
+  wrapping desktop cells and allowing mobile grid cells to shrink and wrap.
 - Make primary Settings a preview-first ideal-temperature, comfort/efficiency slider and
   important-room flow. Explicit application enables reviewed weather-aware Home/Sleep
   bands and equal room influence. Custom settings are preserved until approval; technical
@@ -34,6 +36,8 @@ The live SHADOW soak and Owner-review gates remain required; updating never enab
   offline-copy experiment retention. The earlier full unit and integration/E2E runs pass
   611 and 748 tests respectively; core coverage is 94.76%. See the [UAT report](docs/uat-0.7.0.md)
   for source identities, overlapping counts and external gates that remain unrun.
+- The final byte-exact publication-candidate retest passes 85 UAT, room, packaging and
+  vendor/layout cases after correcting the Celsius/enlarged-text room-table defect.
 
 ## 0.6.8-rc.12 - 2026-11-26 (prerelease)
 

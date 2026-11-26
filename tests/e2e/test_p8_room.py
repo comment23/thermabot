@@ -106,11 +106,17 @@ def test_admin_can_pick_any_room(page: Page, srv: Srv) -> None:
 
 
 @pytest.mark.brd("FR-UI-1")
+@pytest.mark.parametrize("large_text", [False, True], ids=["standard-text", "large-text"])
 @pytest.mark.parametrize("width", [375, 1440])
 @pytest.mark.parametrize("units", ["F", "C"])
 def test_room_insights_table_efficiency_and_ranges(
-    page: Page, srv: Srv, width: int, units: Literal["F", "C"]
+    page: Page, srv: Srv, width: int, units: Literal["F", "C"], large_text: bool
 ) -> None:
+    if large_text:
+        page.add_init_script(
+            """document.addEventListener('DOMContentLoaded', () =>
+                document.documentElement.style.setProperty('font-size', '150%'));"""
+        )
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     srv.ctx.clock = lambda: now
     srv.ctx.settings = srv.ctx.settings.model_copy(
@@ -177,9 +183,10 @@ def test_room_insights_table_efficiency_and_ranges(
     expect(page.get_by_test_id("room-setup")).to_contain_text("Ask an Owner")
     _view(page, "Temperatures")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    assert page.get_by_test_id("room-temperature-table").evaluate(
-        "el => el.scrollWidth <= el.clientWidth + 1"
+    table_size = page.get_by_test_id("room-temperature-table").evaluate(
+        "el => ({scroll: el.scrollWidth, width: el.clientWidth})"
     )
+    assert table_size["scroll"] <= table_size["width"] + 1, table_size
     _view(page, "Efficiency")
     assert page.get_by_test_id("room-efficiency").evaluate(
         "el => el.scrollWidth <= el.clientWidth + 1"

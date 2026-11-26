@@ -76,7 +76,7 @@
       Points are interval means, not instantaneous readings; missing intervals remain gaps. The table below is the accessible alternative.</figcaption>
   </figure>
   <details class="fallback" open><summary>Show interval temperatures</summary>
-  <table class="cards" data-testid="room-temperature-table">
+  <table class="cards room-temperature-table" data-testid="room-temperature-table">
     <thead><tr><th>Interval</th><th>Room mean</th><th>Low / high</th><th>Thermostat</th><th>Outdoor</th><th>Data quality</th></tr></thead>
     <tbody>{% for row in report.rows|reverse %}<tr data-testid="room-temperature-row">
       <td>{{ row.start|localtime('%b %d %H:%M') }} – {{ row.end|localtime('%b %d %H:%M') }}</td>

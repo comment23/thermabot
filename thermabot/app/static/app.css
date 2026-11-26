@@ -292,6 +292,9 @@ nav.room-tabs a { justify-content: center; padding-inline: 8px; font-size: var(-
 .room-checklist { padding-left: 0; list-style: none; }
 .room-checklist li { padding-block: var(--tb-space-3); border-bottom: 1px solid var(--tb-line); }
 .room-checklist small { display: block; margin-block: var(--tb-space-1); }
+main .room-temperature-table { display: table; width: 100%; table-layout: fixed;
+  white-space: normal; overflow: visible; }
+.room-temperature-table th, .room-temperature-table td { overflow-wrap: anywhere; }
 .preference-labels { display: flex; justify-content: space-between; gap: var(--tb-space-2); font-weight: 600; }
 .preference-rooms label { display: block; min-height: var(--tb-tap); overflow-wrap: anywhere; }
 [data-simple-preferences] input[type="range"] { width: 100%; min-height: var(--tb-tap); }
@@ -432,6 +435,8 @@ dl.review dd { margin: 0; overflow-wrap: anywhere; }
   table.cards td:not([data-label]):not(:first-child) { grid-column: 2; grid-row: 1; justify-content: flex-end; }
   table.cards td:last-child:empty { display: none; }
   table.cards td[colspan] { grid-column: 1 / -1; }
+  table.room-temperature-table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-temperature-table td { min-width: 0; flex-wrap: wrap; }
   .room-row, .person-row { grid-template-columns: auto 1fr; }
   .room-row [data-r="temp"], .room-row [data-r="floor"], .person-row [data-p="companion"],
   .person-row [data-p="life360"] { grid-column: 1 / -1; }

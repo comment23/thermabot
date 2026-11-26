@@ -169,6 +169,47 @@ retained separately; the complete final run above passed. The diagnostic fixture
 automatic refit was correctly rejected as physically invalid; only the separate physical
 model fixture's real fit was adopted.
 
+## Publication QA follow-up: room table layout
+
+The first byte-exact staged-Git publication retest passed **67 cases** (29 customer,
+9 lab barriers and 29 packaging/vendor/layout). Its 29 runtime snapshots remained SHADOW
+with zero climate traffic, and its canonical application digest matched the index.
+
+The subsequent pushed-head/PR GitHub CI exposed a real P1 layout defect: both Celsius
+room-table cases, at 375 px and 1440 px, overflowed horizontally. QA-report failed
+downstream; the other required checks, CodeQL and native aarch64 build/scan passed.
+The failure was not waived or retried without a fix.
+
+The table inherited desktop no-wrap styling and mobile intrinsic grid minimums.
+Enlarged-text reproduction also overflowed in all four F/C and phone/desktop cases:
+Celsius content measured 409 px in a 289 px phone table and 1261 px in a 1170 px desktop
+table. Room-scoped fixed/wrapping desktop cells and shrinkable/wrapping mobile cells
+corrected the defect without hiding data or changing other tables. All **18 room E2E
+cases** passed, including eight standard/150%-text, F/C and phone/desktop combinations.
+UAT-66 now explicitly includes those layout checks.
+
+The corrected byte-exact staged-Git candidate then passed **85 cases in 547.68 seconds**:
+29 customer UAT, 9 lab barriers, 18 room E2E and 29 packaging/vendor/layout cases:
+
+```powershell
+python -m pytest tests\uat tests\integration\test_uat_lab.py `
+  tests\unit\test_deploy_files.py tests\e2e\test_layout.py tests\e2e\test_p8_room.py `
+  -q --tb=short --basetemp="$scratch\release-070-remediation-scratch" `
+  --junitxml="$evidence\release-070-remediation-qa.xml" `
+  --uat-artifacts="$evidence\release-070-remediation-evidence"
+```
+
+Canonical 124-file application/package/lock/add-on SHA-256:
+`2afaa3fd47f4e08f972c2498579fbbb8a59ca660d4034f13ca8f2af6ae00ef8a`.
+All scoped bytes remained unchanged through QA and matched the index; the exported
+room test and updated playbook also matched their staged Git blobs. All 29 runtime
+snapshots remained SHADOW with zero climate calls or blocked accidental requests.
+Full Ruff lint/format, strict mypy, compilation, whitespace and staged gitleaks passed.
+Counts overlap earlier suites; they are not added as unique tests.
+
+The remediated head still requires successful protected GitHub CI before merge and
+image publication. This local layout correction does not satisfy any live acceptance gate.
+
 ## Remaining gates
 
 - Published tag/image provenance, amd64/aarch64 boot, isolated HA OS/Supervisor/ingress,
